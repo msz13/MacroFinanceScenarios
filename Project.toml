@@ -1,0 +1,13 @@
+name = "MacroFinanceScenarios"
+uuid = "855219de-e5b9-4c44-9d68-0e4839ca4f75"
+authors = ["Your Name"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.12"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
