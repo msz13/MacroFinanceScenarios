@@ -18,9 +18,10 @@ module HillenbrandMcCarthyModel
 
 using Random, Distributions, LinearAlgebra
 
-export ModelParams, ModelState, default_params,
+export ModelParams, ModelState, SimulationResult, default_params,
        steady_state_pd, simulate_path, compute_log_returns,
-       compute_cumulative_returns, annualised_cumulative_return
+       compute_cumulative_returns, annualised_cumulative_return,
+       extract_at_horizon
 
 # ─────────────────────────────────────────────
 # 1. Parameter & State Structs

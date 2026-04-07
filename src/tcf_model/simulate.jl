@@ -12,7 +12,7 @@ Outputs:
 """
 
 # ── Load model ──
-include(joinpath(@__DIR__, "src", "HillenbrandMcCarthyModel.jl"))
+include(joinpath(@__DIR__, "HillenbrandMcCarthyModel.jl"))
 using .HillenbrandMcCarthyModel
 using Random, Statistics
 
