@@ -11,13 +11,9 @@ Outputs:
     results/simulation_data.jld2   (or falls back to CSV if JLD2 unavailable)
 """
 
-# ── Load model ──
-include(joinpath(@__DIR__, "HillenbrandMcCarthyModel.jl"))
-using .HillenbrandMcCarthyModel
-using Random, Statistics
 
-# ─────────────────────────────────────────────
-# Configuration
+
+# ─────────────────────────────
 # ─────────────────────────────────────────────
 
 const N_PATHS       = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 10_000
@@ -64,10 +60,11 @@ end
 # Run simulation
 # ─────────────────────────────────────────────
 
-function run_monte_carlo(;n_paths=N_PATHS, t_quarters=T_QUARTERS,
+function run_monte_carlo(;params::ModelParams=default_params(),
+                          n_paths=N_PATHS, t_quarters=T_QUARTERS,
                           horizons_q=HORIZONS_Q, horizons_yrs=HORIZONS_YRS)
 
-    p = default_params()
+    p = params
 
     println("═══════════════════════════════════════════════════")
     println("  Hillenbrand & McCarthy (2026) Monte Carlo")
@@ -180,6 +177,41 @@ function save_results(results::MCResults, output_dir::String)
 end
 
 # ─────────────────────────────────────────────
+# Summary statistics
+# ─────────────────────────────────────────────
+
+function print_summary(results::MCResults;
+                       quantiles_list=[0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99])
+    q_labels = ["Q$(round(Int, q*100))" for q in quantiles_list]
+    header   = vcat(["Variable", "Mean", "Std"], q_labels)
+
+    vars = [
+        ("d (log div)", snap -> snap.d,         1.0,   4),
+        ("g (qtr %)",   snap -> snap.g,         100.0, 4),
+        ("pd (log)",    snap -> snap.pd,        1.0,   4),
+        ("r (ann %)",   snap -> snap.ann_log_r, 100.0, 2),
+    ]
+
+    for hy in sort(collect(keys(results.snapshots)))
+        snap = results.snapshots[hy]
+        println("\n── Horizon: $(hy) years ──")
+
+        data = Matrix{Any}(undef, length(vars), length(header))
+        for (i, (label, field, scale, digits)) in enumerate(vars)
+            v = field(snap)
+            data[i, 1] = label
+            data[i, 2] = round(mean(v) * scale, digits=digits)
+            data[i, 3] = round(std(v)  * scale, digits=digits)
+            for (j, q) in enumerate(quantiles_list)
+                data[i, 3+j] = round(quantile(v, q) * scale, digits=digits)
+            end
+        end
+
+        pretty_table(data; column_labels=header, backend = :html)
+    end
+end
+
+# ─────────────────────────────────────────────
 # Main execution
 # ─────────────────────────────────────────────
 
@@ -190,40 +222,12 @@ function main()
     println("\nSaving results...")
     save_results(results, output_dir)
 
-    # Print summary statistics
-    println("\n═══════════════════════════════════════════════════")
-    println("  Summary Statistics")
-    println("═══════════════════════════════════════════════════")
-
-    quantiles_list = [0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
-
-    for hy in sort(collect(keys(results.snapshots)))
-        snap = results.snapshots[hy]
-        println("\n── Horizon: $(hy) years ──")
-
-        println("  Log Dividends (d):")
-        println("    Mean:   $(round(mean(snap.d), digits=4))")
-        println("    Std:    $(round(std(snap.d), digits=4))")
-
-        println("  Trend Growth (g, quarterly %):")
-        println("    Mean:   $(round(mean(snap.g)*100, digits=4))")
-        println("    Std:    $(round(std(snap.g)*100, digits=4))")
-
-        println("  Log Price-Dividend Ratio (pd):")
-        println("    Mean:   $(round(mean(snap.pd), digits=4))")
-        println("    Std:    $(round(std(snap.pd), digits=4))")
-
-        println("  Annualised Log Return (%):")
-        q_vals = quantile(snap.ann_log_r, quantiles_list)
-        println("    Mean:   $(round(mean(snap.ann_log_r)*100, digits=2))%")
-        println("    Std:    $(round(std(snap.ann_log_r)*100, digits=2))%")
-        for (q, v) in zip(quantiles_list, q_vals)
-            println("    Q$(round(Int, q*100)):    $(round(v*100, digits=2))%")
-        end
-    end
+    print_summary(results)
 
     return results
 end
 
 # Run
-results = main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    results = main()
+end

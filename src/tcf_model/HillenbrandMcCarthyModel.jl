@@ -14,14 +14,10 @@ The module provides:
   - Full path simulation (cash flows, pd ratio, returns)
   - Present-value helper functions
 """
-module HillenbrandMcCarthyModel
-
-using Random, Distributions, LinearAlgebra
-
-export ModelParams, ModelState, SimulationResult, default_params,
+#= export ModelParams, ModelState, SimulationResult, default_params,
        steady_state_pd, simulate_path, compute_log_returns,
        compute_cumulative_returns, annualised_cumulative_return,
-       extract_at_horizon
+       extract_at_horizon =#
 
 # ─────────────────────────────────────────────
 # 1. Parameter & State Structs
@@ -334,5 +330,3 @@ Return ModelParams with the paper's baseline estimates.
 function default_params()
     return ModelParams()
 end
-
-end # module
