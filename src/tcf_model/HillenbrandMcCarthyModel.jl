@@ -184,8 +184,8 @@ Initialise state at approximate 1871 starting values
 (trend growth ≈ 2% annual ≈ 0.5% quarterly, μ at steady state).
 """
 function default_initial_state(p::ModelParams)
-    g0 = 0.005                        # ≈ 2% annual trend growth
-    τ0 = 0.0                          # normalise initial trend to 0
+    g0 = 0.0042                   # ≈ 2% annual trend growth
+    τ0 = 2.82                       # normalise initial trend to 0
     c0 = 0.0
     ε_c0 = 0.0
     μ0 = p.μ_bar
