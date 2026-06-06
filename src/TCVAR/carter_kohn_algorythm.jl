@@ -50,9 +50,10 @@ function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missin
             # Kalman gain
             kalman_gain = covariance_predicted_t * model.Z' * inv(innovation_covariance)
 
-            # Filtered state and covariance
+            # Filtered state and covariance (Joseph form for numerical stability)
             state_filtered[t, :] = state_predicted_t + kalman_gain * innovation
-            covariance_filtered[t, :, :] = make_posdef(covariance_predicted_t - kalman_gain * model.Z * covariance_predicted_t)
+            IKZ = I - kalman_gain * model.Z
+            covariance_filtered[t, :, :] = make_posdef(IKZ * covariance_predicted_t * IKZ' + kalman_gain * model.H * kalman_gain')
             
             # Log-likelihood contribution TODO protect negative values
             log_likelihood += 0. #-0.5 * (log(det(innovation_covariance)) + innovation' * inv(innovation_covariance) * innovation)
