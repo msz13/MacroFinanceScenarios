@@ -1,6 +1,7 @@
 module TCVAR
 
 using Plots
+using Distributions
 using MCMCChains
 #using StatsPlots
 using LinearAlgebra
@@ -19,7 +20,7 @@ include("utils.jl")
 
 export tc_var, sample
 export plot_variable_states
-export gibs_sampler
+export gibbs_sampler
 export carter_kohn_sampler
 export compute_posterior_statistics
 export cum_returns_in_periods, print_scenarios_summary, print_scenarios_percentiles

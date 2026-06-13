@@ -1,11 +1,14 @@
 using LinearAlgebra
-using Distributions
 using Random
 
-function make_posdef(A::AbstractMatrix; ε::Float64=1e-8)
+"""
+Returns the matrix square root L of a symmetric matrix A via eigendecomposition,
+such that L * L' ≈ A. Use as: mean + eigen_sqrt(cov) * randn(n)
+"""
+function eigen_sqrt(A::AbstractMatrix)
     A_sym = Hermitian((A + A') / 2)
     vals, vecs = eigen(A_sym)
-    return Hermitian(vecs * Diagonal(max.(vals, ε)) * vecs')
+    return vecs * Diagonal(sqrt.(max.(vals, 0.0)))
 end
 
 """
@@ -31,10 +34,10 @@ function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missin
         # Prediction step
         if t == 1
             state_predicted_t = model.T * state_current
-            covariance_predicted_t = make_posdef(model.T * covariance_current * model.T' + model.R * model.Q * model.R')
+            covariance_predicted_t = model.T * covariance_current * model.T' + model.R * model.Q * model.R'
         else
             state_predicted_t = model.T * state_filtered[t-1, :]
-            covariance_predicted_t = make_posdef(model.T * reshape(covariance_filtered[t-1, :, :], n_states, n_states) * model.T' + model.R * model.Q * model.R')
+            covariance_predicted_t = model.T * reshape(covariance_filtered[t-1, :, :], n_states, n_states) * model.T' + model.R * model.Q * model.R'
         end
         
         state_predicted[t, :] = state_predicted_t
@@ -45,15 +48,15 @@ function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missin
         if !any(ismissing.(y_t))
             # Innovation
             innovation = y_t - model.Z * state_predicted_t
-            innovation_covariance = make_posdef(model.Z * covariance_predicted_t * model.Z' + model.H)
+            innovation_covariance = model.Z * covariance_predicted_t * model.Z' + model.H
 
             # Kalman gain
-            kalman_gain = covariance_predicted_t * model.Z' * inv(innovation_covariance)
+            kalman_gain = covariance_predicted_t * model.Z' * pinv(innovation_covariance)
 
             # Filtered state and covariance (Joseph form for numerical stability)
             state_filtered[t, :] = state_predicted_t + kalman_gain * innovation
             IKZ = I - kalman_gain * model.Z
-            covariance_filtered[t, :, :] = make_posdef(IKZ * covariance_predicted_t * IKZ' + kalman_gain * model.H * kalman_gain')
+            covariance_filtered[t, :, :] = IKZ * covariance_predicted_t * IKZ' + kalman_gain * model.H * kalman_gain'
             
             # Log-likelihood contribution TODO protect negative values
             log_likelihood += 0. #-0.5 * (log(det(innovation_covariance)) + innovation' * inv(innovation_covariance) * innovation)
@@ -89,7 +92,7 @@ function carter_kohn_sampler2(model::StateSpaceModel, observations::Matrix{Union
         # Sample final state from filtered distribution at T
         final_state_mean = state_filtered[end, :]
         final_state_covariance = covariance_filtered[end, :, :]
-        state_smoothed_current[end, :] = rand(MvNormal(final_state_mean, Hermitian(final_state_covariance)))
+        state_smoothed_current[end, :] = final_state_mean + eigen_sqrt(final_state_covariance) * randn(n_states)
         
         # Backward pass: sample states from T-1 down to 1
         for t in (n_time_steps-1):-1:1
@@ -102,7 +105,7 @@ function carter_kohn_sampler2(model::StateSpaceModel, observations::Matrix{Union
             covariance_predicted_t_plus_1 = covariance_predicted[t+1, :, :]
             
             # Compute smoothing gain matrix
-            smoothing_gain = covariance_filtered_t * model.T' * inv(covariance_predicted_t_plus_1)
+            smoothing_gain = covariance_filtered_t * model.T' * pinv(covariance_predicted_t_plus_1)
             
             # Conditional mean and covariance for state at time t given state at t+1
             state_smoothed_mean = state_filtered_t + 
@@ -116,9 +119,9 @@ function carter_kohn_sampler2(model::StateSpaceModel, observations::Matrix{Union
             covariance_smoothed += 1e-10 * I
             
             # Sample state at time t
-            state_smoothed_current[t, :] = rand(MvNormal(state_smoothed_mean, covariance_smoothed))
+            state_smoothed_current[t, :] = state_smoothed_mean + eigen_sqrt(covariance_smoothed) * randn(n_states)
         end
-        
+
         state_smoothed_samples[sample_idx, :, :] = state_smoothed_current
     end
     
@@ -142,8 +145,8 @@ function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{
         
     # Sample final state from filtered distribution at T
     final_state_mean = state_filtered[end, :]
-    final_state_covariance = make_posdef(covariance_filtered[end, :, :])
-    state_smoothed_current[end, :] = rand(MvNormal(final_state_mean, final_state_covariance))
+    final_state_covariance = covariance_filtered[end, :, :]
+    state_smoothed_current[end, :] = final_state_mean + eigen_sqrt(final_state_covariance) * randn(n_states)
         
     # Backward pass: sample states from T-1 down to 1
     for t in (n_time_steps-1):-1:1
@@ -156,17 +159,17 @@ function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{
         covariance_predicted_t_plus_1 = covariance_predicted[t+1, :, :]
             
         # Compute smoothing gain matrix
-        smoothing_gain = covariance_filtered_t * model.T' * inv(make_posdef(covariance_predicted_t_plus_1))
+        smoothing_gain = covariance_filtered_t * model.T' * pinv(covariance_predicted_t_plus_1)
 
         # Conditional mean and covariance for state at time t given state at t+1
         state_smoothed_mean = state_filtered_t +
             smoothing_gain * (state_smoothed_current[t+1, :] - state_predicted_t_plus_1)
 
-        covariance_smoothed = make_posdef(covariance_filtered_t - smoothing_gain * model.T * covariance_filtered_t)
+        covariance_smoothed = covariance_filtered_t - smoothing_gain * model.T * covariance_filtered_t
             
         # Sample state at time t
-        state_smoothed_current[t, :] = rand(MvNormal(state_smoothed_mean, covariance_smoothed))
-    end        
+        state_smoothed_current[t, :] = state_smoothed_mean + eigen_sqrt(covariance_smoothed) * randn(n_states)
+    end
      
     return state_smoothed_current
 

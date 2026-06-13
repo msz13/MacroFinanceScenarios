@@ -21,7 +21,7 @@ trend_covariance_names(n_variables) = ["Στ$i" for i in 1:n_variables*n_variabl
     thin: skip nth sample
 """
 
-function gibs_sampler(data, trend_mapping, priors; burnin = 1000, n_samples=1000, thin=1)
+function gibbs_sampler(data, trend_mapping, priors; burnin = 1000, n_samples=1000, thin=1, logging=false)
 
     n_time_steps, n_obs = size(data) 
     n_trends = size(trend_mapping, 2)
@@ -42,7 +42,7 @@ function gibs_sampler(data, trend_mapping, priors; burnin = 1000, n_samples=1000
     Ω = λ^2 ./ diag(priors.cycle_covariance_mean)
     Ω_inv = inv(Diagonal(Ω))
     
-    trend_covariance_scale = priors.trend_covariance_mean * (priors.trend_covariance_df + n_obs + 1)
+    trend_covariance_scale = priors.trend_covariance_mean * (priors.trend_covariance_df + n_trends + 1)
     cycle_covariance_scale = priors.cycle_covariance_mean * (priors.cycle_covariance_df + n_obs + 1)
 
     initial_cycle_covariance = priors.cycle_covariance_mean
@@ -76,14 +76,16 @@ function gibs_sampler(data, trend_mapping, priors; burnin = 1000, n_samples=1000
 
         trend_covariance[s, :, :] = rand(covariance_posterior(trends_states[s,:,:], trend_covariance_scale, dτ_post))
 
-        betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], 1, priors.cycle_coeff_mean, Ω_inv, cycle_covariance_scale, dc_post) 
-               
+        betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], 1, priors.cycle_coeff_mean, Ω_inv, cycle_covariance_scale, dc_post)
+
+        logging && s % 1000 == 0 && @info "Gibbs sampler: draw $s of $n_draws"
+
     end
 
     t_trends_states = trends_states[burnin+1:thin:end, :, :]
     t_cycle_states =  cycle_states[burnin+1:thin:end, :, :]
     t_trend_covariance = Chains(reshape(trend_covariance[burnin+1:thin:end,:,:], n_samples÷thin, n_trends*n_trends, 1), trend_covariance_names(n_trends))
-    t_betas = Chains(betas[burnin+1:thin:end,:,:], cycle_covariance_names(k))
+    t_betas = Chains(betas[burnin+1:thin:end,:,:], coeff_names(k))
     t_sigmas = Chains(reshape(sigmas[burnin+1:thin:end,:,:], n_samples÷thin, n_obs*n_obs, 1), cycle_covariance_names(n_obs))
     
     return t_trends_states, t_cycle_states, t_trend_covariance, t_betas, t_sigmas 

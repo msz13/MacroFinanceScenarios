@@ -32,13 +32,18 @@ posterior_beta_coefficient_mean(Y, X, beta_mean, Ω_inv) = inv(X'X + Ω_inv)*(X'
 
 #Ω_inv prior of beta coefficient variance
 
-function beta_posterior_dist(X, Σ, beta_posterior, Ω_inv)
-    
-    n = size(Σ,1)
+function draw_beta(X, Σ, beta_posterior, Ω_inv)
 
-    beta_var = kron(Σ, inv(X'X + Ω_inv)) + I(n*n) * 1e-5
-    return MvNormal(vec(beta_posterior), Hermitian(beta_var))
-  
+    n = size(Σ, 1)
+
+    beta_var = kron(Σ, inv(X'X + Ω_inv)) + I(n * n) * 1e-5
+
+    F = eigen(Hermitian(beta_var))
+    λ = max.(F.values, 0.0)
+    L = F.vectors * Diagonal(sqrt.(λ))
+
+    return vec(beta_posterior) + L * randn(n * n)
+
 end
 
 
@@ -57,27 +62,48 @@ end
 
 
 """
+    is_stationary(β, n, p)
+
+Check VAR(p) stationarity via the companion matrix eigenvalues.
+`β` is a vector of length n*(n*p), reshaped to [A₁ A₂ … Aₚ] (n × n*p).
+Returns true if all eigenvalues of the companion matrix have modulus < 1.
+"""
+function is_stationary(β::Vector, n::Int, p::Int)
+    A = reshape(β, n, n * p)
+    if p == 1
+        return all(abs.(eigvals(A)) .< 1.0)
+    end
+    companion = vcat(A, hcat(I(n * (p - 1)), zeros(n * (p - 1), n)))
+    return all(abs.(eigvals(companion)) .< 1.0)
+end
+
+
+"""
     sample_var_params(data,p, β_mean, Ω_inv)
 
     data: observations
     p: number of lags
-    β_priormean: prior mean of beta coefficients     
-    Ω_inv: inversion prior variance of beta coefficients 
+    β_priormean: prior mean of beta coefficients
+    Ω_inv: inversion prior variance of beta coefficients
     S: prior covariance scale
-    df: posterior covariance distribution degrees of freedom    
+    df: posterior covariance distribution degrees of freedom
 """
-function sample_var_params(data, p, β_prior_μ, Ω_inv, S, df)
+function sample_var_params(data, p, β_prior_μ, Ω_inv, S, df; max_draws::Int = 100)
 
     Y, X = prepare_var_data(data, p)
-    
-    
-    β_hat = posterior_beta_coefficient_mean(Y, X, β_prior_μ, Ω_inv) #mean of posterior distribution of coefficients
+    n = size(Y, 2)
+
+    β_hat = posterior_beta_coefficient_mean(Y, X, β_prior_μ, Ω_inv)
 
     Σ = rand(covariance_posterior_dist(Y, X, β_hat, df, S, β_prior_μ, Ω_inv))
 
-    β = rand(beta_posterior_dist(X, Σ, β_hat, Ω_inv))
+    β = draw_beta(X, Σ, β_hat, Ω_inv)
 
-   
+    draws = 1
+    while !is_stationary(β, n, p) && draws < max_draws
+        β = draw_beta(X, Σ, β_hat, Ω_inv)
+        draws += 1
+    end
 
     return β, Σ
 
