@@ -55,10 +55,10 @@ function gibbs_sampler(data, trend_mapping, priors; burnin = 1000, n_samples=100
     betas = zeros(n_draws, k*k)
     sigmas = zeros(n_draws, n_obs, n_obs)
 
-    #sample initial parameters values from prior distribution
-    trend_covariance[1, :, :] = rand(InverseWishart(priors.trend_covariance_df, trend_covariance_scale))
-    betas[1, :] = priors.cycle_coeff_mean #rand(MvNormal(vec(priors.cycle_coeff_mean), reshape(vec(diagm(Ω)), k, k)))
-    sigmas[1, :, :] = rand(InverseWishart(priors.cycle_covariance_df, cycle_covariance_scale)) 
+    #set initial parameters values to prior values
+    trend_covariance[1, :, :] = priors.trend_covariance_mean
+    betas[1, :] = Matrix(I(n_obs))
+    sigmas[1, :, :] = priors.cycle_covariance_mean
     
   
     for s in 2:n_draws

@@ -43,25 +43,31 @@ function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missin
         state_predicted[t, :] = state_predicted_t
         covariance_predicted[t, :, :] = covariance_predicted_t
         
-        # Update step (if observation is available)
+        # Update step using only the observed (non-missing) series at time t
         y_t = observations[t, :]
-        if !any(ismissing.(y_t))
+        obs_idx = findall(!ismissing, y_t)
+        if !isempty(obs_idx)
+            # Subset observation equation to the available series
+            y = Float64.(y_t[obs_idx])
+            Z_t = model.Z[obs_idx, :]
+            H_t = model.H[obs_idx, obs_idx]
+
             # Innovation
-            innovation = y_t - model.Z * state_predicted_t
-            innovation_covariance = model.Z * covariance_predicted_t * model.Z' + model.H
+            innovation = y - Z_t * state_predicted_t
+            innovation_covariance = Z_t * covariance_predicted_t * Z_t' + H_t
 
             # Kalman gain
-            kalman_gain = covariance_predicted_t * model.Z' * pinv(innovation_covariance)
+            kalman_gain = covariance_predicted_t * Z_t' * pinv(innovation_covariance)
 
             # Filtered state and covariance (Joseph form for numerical stability)
             state_filtered[t, :] = state_predicted_t + kalman_gain * innovation
-            IKZ = I - kalman_gain * model.Z
-            covariance_filtered[t, :, :] = IKZ * covariance_predicted_t * IKZ' + kalman_gain * model.H * kalman_gain'
-            
+            IKZ = I - kalman_gain * Z_t
+            covariance_filtered[t, :, :] = IKZ * covariance_predicted_t * IKZ' + kalman_gain * H_t * kalman_gain'
+
             # Log-likelihood contribution TODO protect negative values
             log_likelihood += 0. #-0.5 * (log(det(innovation_covariance)) + innovation' * inv(innovation_covariance) * innovation)
         else
-            # No observation available
+            # No observation available this period
             state_filtered[t, :] = state_predicted_t
             covariance_filtered[t, :, :] = covariance_predicted_t
         end
