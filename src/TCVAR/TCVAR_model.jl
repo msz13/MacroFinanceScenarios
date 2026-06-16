@@ -29,32 +29,62 @@ struct StateSpaceModel
 end
 
 
-function tc_var(trend_mapping, var_coeff, trend_cov, cycle_cov, initial_trend_mean, initial_cycle_mean, initial_trend_covariance, initial_cycle_covariance)
+"""
+    tc_var(trend_mapping, var_coeff, trend_cov, cycle_cov, ...; p = 1)
+
+Build the state space representation of a trend-cycle model whose cycle follows a
+VAR(`p`). The cycle is represented in companion form, ordered oldest-lag-first:
+
+    ξ_t = [c_{t-p+1}; …; c_{t-1}; c_t]   (length n_variables * p)
+
+so that `var_coeff` (size n_variables × n_variables*p) is the companion bottom block
+[A_p … A_1] matching that ordering, i.e. the rows of the regression `Y = X·B` with
+predictors stacked oldest-lag-first (`var_coeff == B'`). The contemporaneous cycle
+`c_t` is the last block of ξ_t.
+
+`initial_cycle_mean` / `initial_cycle_covariance` must be sized for the full
+companion state (length / order n_variables * p). For `p == 1` this reduces to the
+original VAR(1) model.
+"""
+function tc_var(trend_mapping, var_coeff, trend_cov, cycle_cov, initial_trend_mean, initial_cycle_mean, initial_trend_covariance, initial_cycle_covariance; p::Int = 1)
 
     n_variables, n_trends = size(trend_mapping)
-    n_states = n_variables + n_trends
-    
-    T = [I(n_trends) zeros(n_trends, n_variables) # Transition  matrix
-         zeros(n_variables, n_trends) var_coeff
-         ]
+    n_cycle_states = n_variables * p          # cycle companion state dimension
+    n_states = n_trends + n_cycle_states
 
-    Q = [trend_cov zeros(n_trends, n_variables) #State noise covariance
-         zeros(n_variables, n_trends) cycle_cov]
+    # Companion transition for the cycle VAR(p), oldest-lag-first ordering.
+    if p == 1
+        cycle_transition = var_coeff
+    else
+        cycle_transition = vcat(
+            hcat(zeros(n_variables * (p - 1), n_variables), I(n_variables * (p - 1))),
+            var_coeff)
+    end
+
+    T = [I(n_trends)                      zeros(n_trends, n_cycle_states) # Transition matrix
+         zeros(n_cycle_states, n_trends)  cycle_transition]
+
+    # Only the contemporaneous cycle block (last block) carries noise.
+    cycle_Q = zeros(n_cycle_states, n_cycle_states)
+    cycle_Q[end-n_variables+1:end, end-n_variables+1:end] = cycle_cov
+    Q = [trend_cov                        zeros(n_trends, n_cycle_states) #State noise covariance
+         zeros(n_cycle_states, n_trends)  cycle_Q]
 
     R = Matrix(I, n_states, n_states)  # State noise coefficient matrix
-    Z = hcat(trend_mapping, I(n_variables)) # Observation matrix
+    # Observation maps trends and the contemporaneous cycle (last companion block).
+    Z = hcat(trend_mapping, zeros(n_variables, n_variables * (p - 1)), I(n_variables))
 
 
      H = Matrix(I, n_variables, n_variables) * eps()  # Observation noise covariance
 
      initial_state_mean = [initial_trend_mean; initial_cycle_mean]
 
-     initial_state_covariance = [initial_trend_covariance zeros(n_trends, n_variables)
-                                 zeros(n_variables, n_trends) initial_cycle_covariance]
+     initial_state_covariance = [initial_trend_covariance zeros(n_trends, n_cycle_states)
+                                 zeros(n_cycle_states, n_trends) initial_cycle_covariance]
 
-  
+
     return StateSpaceModel(T, R, Z, Q, H, initial_state_mean, initial_state_covariance)
-    
+
 
 end
 

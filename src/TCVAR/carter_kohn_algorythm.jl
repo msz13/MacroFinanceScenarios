@@ -185,7 +185,7 @@ end
 
 #TODO sprawdizc cze reshape beta jest dobre
 
-function sample_states(data, trend_mapping, cycle_coeffs, trend_covariance, cycle_covariance, initial_trend_mean, initial_cycle_mean, initial_trend_covariance, initial_cycle_covariance)
+function sample_states(data, trend_mapping, cycle_coeffs, trend_covariance, cycle_covariance, initial_trend_mean, initial_cycle_mean, initial_trend_covariance, initial_cycle_covariance; p::Int = 1)
 
     n_observations, n_trends = size(trend_mapping)
 
@@ -193,17 +193,22 @@ function sample_states(data, trend_mapping, cycle_coeffs, trend_covariance, cycl
                 trend_mapping,
                 cycle_coeffs,
                 trend_covariance,
-                cycle_covariance,       
-                initial_trend_mean, 
+                cycle_covariance,
+                initial_trend_mean,
                 initial_cycle_mean,
                 initial_trend_covariance,
-                initial_cycle_covariance                              
+                initial_cycle_covariance;
+                p = p
                 )
-        
+
         state_smoothed_samples = carter_kohn_sampler(model, data)
 
+        # Cycle companion is ordered oldest-lag-first; the contemporaneous cycle
+        # c_t is the last block of size n_observations.
+        cycle_start = n_trends + n_observations * (p - 1) + 1
+
         trends_states = state_smoothed_samples[:, 1:n_trends]
-        cycle_states =  state_smoothed_samples[:, n_trends+1:n_trends+n_observations]
+        cycle_states =  state_smoothed_samples[:, cycle_start:cycle_start+n_observations-1]
 
         return trends_states, cycle_states
 
