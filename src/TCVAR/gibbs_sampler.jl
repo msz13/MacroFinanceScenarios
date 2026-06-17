@@ -16,23 +16,33 @@ trend_covariance_names(n_variables) = ["Στ$i" for i in 1:n_variables*n_variabl
 """
     data: T x m matrix of observations
     trend_mapping: m x n_trends mapping of trends to observations
-    priors: Named tuples of priors
-    p: number of VAR lags for the cycle (default 1)
-    n_samples: number of samples
-    burnin: numper of samples to discart
-    thin: skip nth sample
+    priors: NamedTuple of trend / initial-state priors with fields
+        `initial_trend_mean`, `initial_cycle_mean`, `initial_trend_covariance`,
+        `trend_covariance_df`, `trend_covariance_mean`.
+    cycle_prior::MinnesotaPrior: Minnesota prior for the cycle VAR. Its `n` must
+        equal the number of observed variables and its `p` sets the number of
+        cycle VAR lags.
+    n_samples: number of retained samples
+    burnin: number of samples to discard
+    thin: keep every `thin`-th sample
 
-When `p > 1`, `priors.cycle_coeff_mean` must be sized (n_obs*p) x n_obs (the prior
-mean of the regression coefficients `B` for `Y = X·B`, predictors stacked
-oldest-lag-first). The coefficient prior variance is a Minnesota-style diagonal that
-scales as λ²/(l²·σ_j²) for lag `l`, which reduces to the original λ²/σ_j² when p = 1.
+The cycle is mean-zero, so the prior's intercept row is dropped. `MinnesotaPrior`
+orders its regressors newest-lag-first (`[lag1 … lagp, const]`), whereas the
+state-space sampler stacks predictors oldest-lag-first (see `prepare_var_data`),
+so the lag blocks of `Φ₀` and `Ω` are reversed here. Following the
+Giannone–Lenza–Primiceri parameterization `Σ ~ IW(Ψ, d)`, the prior IW scale is
+`Ψ` directly.
 """
 
-function gibbs_sampler(data, trend_mapping, priors; p::Int = 1, burnin = 1000, n_samples=1000, thin=1, logging=false)
+function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior; burnin = 1000, n_samples=1000, thin=1, logging=false)
 
     n_time_steps, n_obs = size(data)
     n_trends = size(trend_mapping, 2)
+    p = cycle_prior.p
     k = n_obs * p #number of var coefficients per equation (lags stacked)
+
+    n_obs == cycle_prior.n ||
+        throw(DimensionMismatch("cycle_prior.n = $(cycle_prior.n) must match the number of observed variables $n_obs"))
 
     n_draws = burnin + n_samples
 
@@ -40,25 +50,24 @@ function gibbs_sampler(data, trend_mapping, priors; p::Int = 1, burnin = 1000, n
     dτ_post = n_time_steps - p + priors.trend_covariance_df
 
     #posterior degrees pf freedom for cycle covariance matrix
-    dc_post = n_time_steps - p + priors.cycle_covariance_df
+    dc_post = n_time_steps - p + cycle_prior.d
 
-    #prior variance of cycle coefficients (Minnesota-style, with lag decay λ²/(l²σ²))
-    #predictors are ordered oldest-lag-first, so block b corresponds to lag l = p-b+1
-    λ = priors.cycle_coeff_shrinkage_param
-    σ2 = diag(priors.cycle_covariance_mean)
-    Ω = zeros(k)
-    for b in 1:p
-        l = p - b + 1
-        Ω[(b-1)*n_obs+1 : b*n_obs] = λ^2 ./ (l^2 .* σ2)
-    end
+    #cycle VAR prior translated to the sampler's oldest-lag-first, no-intercept layout
+    #(MinnesotaPrior stores regressors as [lag1 … lagp, const]; reverse the lag blocks)
+    Ω = vec(reverse(reshape(diag(cycle_prior.Ω)[1:k], n_obs, p), dims=2))
     Ω_inv = inv(Diagonal(Ω))
 
+    cycle_coeff_mean = reshape(reverse(reshape(cycle_prior.Φ₀[1:k, :], n_obs, p, n_obs), dims=2), k, n_obs)
+
+    #MinnesotaPrior: Σ ~ IW(Ψ, d), so Ψ is the prior scale; its mean is Ψ/(d-n-1)
+    cycle_covariance_scale = Matrix(cycle_prior.Ψ)
+    cycle_covariance_mean = cycle_covariance_scale / (cycle_prior.d - n_obs - 1)
+
     trend_covariance_scale = priors.trend_covariance_mean * (priors.trend_covariance_df + n_trends + 1)
-    cycle_covariance_scale = priors.cycle_covariance_mean * (priors.cycle_covariance_df + n_obs + 1)
 
     # Initial state mean/covariance for the cycle companion (length / order n_obs*p)
     initial_cycle_mean = repeat(priors.initial_cycle_mean, p)
-    initial_cycle_covariance = kron(Matrix(I, p, p), Matrix(priors.cycle_covariance_mean))
+    initial_cycle_covariance = kron(Matrix(I, p, p), cycle_covariance_mean)
 
     # Storage for sampled states and variables
     trends_states = zeros(n_draws, n_time_steps, n_trends)
@@ -72,7 +81,7 @@ function gibbs_sampler(data, trend_mapping, priors; p::Int = 1, burnin = 1000, n
     trend_covariance[1, :, :] = priors.trend_covariance_mean
     # identity dynamics on the most recent lag (last predictor block), zero elsewhere
     betas[1, :] = vec([zeros(n_obs*(p-1), n_obs); Matrix(I(n_obs))])
-    sigmas[1, :, :] = priors.cycle_covariance_mean
+    sigmas[1, :, :] = cycle_covariance_mean
 
 
     for s in 2:n_draws
@@ -91,7 +100,7 @@ function gibbs_sampler(data, trend_mapping, priors; p::Int = 1, burnin = 1000, n
 
         trend_covariance[s, :, :] = rand(covariance_posterior(trends_states[s,:,:], trend_covariance_scale, dτ_post))
 
-        betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], p, priors.cycle_coeff_mean, Ω_inv, cycle_covariance_scale, dc_post)
+        betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], p, cycle_coeff_mean, Ω_inv, cycle_covariance_scale, dc_post)
 
         logging && s % 1000 == 0 && @info "Gibbs sampler: draw $s of $n_draws"
 
