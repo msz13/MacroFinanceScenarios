@@ -41,16 +41,20 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
     p = cycle_prior.p
     k = n_obs * p #number of var coefficients per equation (lags stacked)
 
+    # sample_states prepends the drawn initial state (t = 0) to the t = 1..T
+    # smoothed states, so the sampled state paths span n_time_steps + 1 points.
+    n_states_time_steps = n_time_steps + 1
+
     n_obs == cycle_prior.n ||
         throw(DimensionMismatch("cycle_prior.n = $(cycle_prior.n) must match the number of observed variables $n_obs"))
 
     n_draws = burnin + n_samples
 
     #posterior degrees pf freedom for trend covariance matrix
-    dτ_post = n_time_steps - p + priors.trend_covariance_df
+    dτ_post = n_states_time_steps - p + priors.trend_covariance_df
 
     #posterior degrees pf freedom for cycle covariance matrix
-    dc_post = n_time_steps - p + cycle_prior.d
+    dc_post = n_states_time_steps - p + cycle_prior.d
 
     #cycle VAR prior translated to the sampler's oldest-lag-first, no-intercept layout
     #(MinnesotaPrior stores regressors as [lag1 … lagp, const]; reverse the lag blocks)
@@ -69,9 +73,9 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
     initial_cycle_mean = repeat(priors.initial_cycle_mean, p)
     initial_cycle_covariance = kron(Matrix(I, p, p), cycle_covariance_mean)
 
-    # Storage for sampled states and variables
-    trends_states = zeros(n_draws, n_time_steps, n_trends)
-    cycle_states = zeros(n_draws, n_time_steps, n_obs)
+    # Storage for sampled states and variables (states include t = 0)
+    trends_states = zeros(n_draws, n_states_time_steps, n_trends)
+    cycle_states = zeros(n_draws, n_states_time_steps, n_obs)
 
     trend_covariance = zeros(n_draws, n_trends, n_trends)
     betas = zeros(n_draws, n_obs*k)

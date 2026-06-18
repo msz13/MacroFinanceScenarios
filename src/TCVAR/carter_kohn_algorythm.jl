@@ -172,12 +172,25 @@ function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{
             smoothing_gain * (state_smoothed_current[t+1, :] - state_predicted_t_plus_1)
 
         covariance_smoothed = covariance_filtered_t - smoothing_gain * model.T * covariance_filtered_t
-            
+
         # Sample state at time t
         state_smoothed_current[t, :] = state_smoothed_mean + eigen_sqrt(covariance_smoothed) * randn(n_states)
     end
-     
-    return state_smoothed_current
+
+    # Draw the initial state (t = 0) conditional on the sampled state at t = 1,
+    # using the prior moments (initial_state_mean / covariance) as the "filtered"
+    # estimate at t = 0 and the predicted moments at t = 1.
+    initial_smoothing_gain = model.initial_state_covariance * model.T' * pinv(covariance_predicted[1, :, :])
+
+    initial_state_mean = model.initial_state_mean +
+        initial_smoothing_gain * (state_smoothed_current[1, :] - state_predicted[1, :])
+
+    initial_state_covariance = model.initial_state_covariance -
+        initial_smoothing_gain * model.T * model.initial_state_covariance
+
+    initial_state = initial_state_mean + eigen_sqrt(initial_state_covariance) * randn(n_states)
+
+    return initial_state, state_smoothed_current
 
 end
 
@@ -201,14 +214,21 @@ function sample_states(data, trend_mapping, cycle_coeffs, trend_covariance, cycl
                 p = p
                 )
 
-        state_smoothed_samples = carter_kohn_sampler(model, data)
+        initial_state, state_smoothed_samples = carter_kohn_sampler(model, data)
 
         # Cycle companion is ordered oldest-lag-first; the contemporaneous cycle
         # c_t is the last block of size n_observations.
         cycle_start = n_trends + n_observations * (p - 1) + 1
 
-        trends_states = state_smoothed_samples[:, 1:n_trends]
-        cycle_states =  state_smoothed_samples[:, cycle_start:cycle_start+n_observations-1]
+        # Stack the drawn initial state (t = 0) on top of the sampled t = 1..T states.
+        trends_states = vcat(
+            initial_state[1:n_trends]',
+            state_smoothed_samples[:, 1:n_trends]
+        )
+        cycle_states = vcat(
+            initial_state[cycle_start:cycle_start+n_observations-1]',
+            state_smoothed_samples[:, cycle_start:cycle_start+n_observations-1]
+        )
 
         return trends_states, cycle_states
 
