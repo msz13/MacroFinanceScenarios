@@ -140,7 +140,7 @@ function carter_kohn_sampler2(model::StateSpaceModel, observations::Matrix{Union
             covariance_predicted_t_plus_1 = covariance_predicted[t+1, :, :]
             
             # Compute smoothing gain matrix
-            smoothing_gain = covariance_filtered_t * model.T' * pinv(covariance_predicted_t_plus_1)
+            smoothing_gain = covariance_filtered_t * model.T' * inv(covariance_predicted_t_plus_1)
             
             # Conditional mean and covariance for state at time t given state at t+1
             state_smoothed_mean = state_filtered_t + 
