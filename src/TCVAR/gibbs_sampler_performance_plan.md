@@ -42,22 +42,37 @@ Dimension drops from `n_states^2` to `n_cycle_states^2` and SVD -> LU.
 
 **Effort: low. Impact: very high. Risk: low (isolated to one function).**
 
-### 2. Kalman filter / smoother use `pinv` + `eigen` per time step
+### 2. Kalman filter / smoother use `pinv` + `eigen` per time step — DONE
 `carter_kohn_algorythm.jl`
 - `kalman_filter:60` `pinv(innovation_covariance)` every t
 - `carter_kohn_sampler:168` `pinv(covariance_predicted_t_plus_1)` every t
 - `eigen_sqrt` (`:8`) does a full `eigen` for every sampled state, every t
 
-A clean Cholesky-based version **already exists and is unused**: `kalman_filter` /
-`carter_kohn` in `kalman_filter_smoother.jl` (uses `cholesky`, `\`, `logdet`).
-Routing `sample_states` onto that path replaces `O(T)` SVDs + eigendecompositions
-per draw with Cholesky solves.
+The standalone Cholesky version in `kalman_filter_smoother.jl` could not be used
+verbatim: it handles neither **missing observations** (the Del Negro data sets
+`BILL` missing after 2008Q4) nor the **t = 0 initial-state draw** that
+`sample_states` depends on, and it is not even `include`d in the module. Instead
+the Cholesky technique was brought into the existing `kalman_filter` /
+`carter_kohn_sampler`, preserving their interfaces, the missing-data subsetting,
+and the pre-sample draw:
 
-Caveat: `H = eps()*I` makes the innovation covariance `S` near-singular — may need
-a small jitter for `cholesky` to stay robust.
+- every `pinv(S)` gain solve → a Cholesky solve `(P·Zᵀ) / chol_psd(S)`;
+- every `eigen_sqrt(cov)*randn` draw → `sample_mvn` = `mean + chol_psd(cov).L*randn`;
+- `model.R*model.Q*model.R'` is now hoisted out of the time loop (the step-5 piece).
 
-**Effort: medium. Impact: high. Risk: medium (swaps the sampling kernel — needs a
-fixed-seed equivalence check).**
+`chol_psd` (new helper) symmetrizes, then `cholesky(...; check=false)` with a
+trace-scaled jitter fallback so the near-singular innovation covariance from
+`H = eps()*I` stays factorable.
+
+Validated: against an inline `pinv` reference filter the deterministic filtered /
+predicted means and covariances match to ~1e-14 on a TC-VAR(2) with a missing
+series; FFBS draws stay finite and `sample_states` returns the right shapes. (Note:
+bit-identical draws are *not* expected under a fixed seed — a Cholesky factor is a
+different matrix square root than `eigen_sqrt`, so the same `randn` maps to a
+different point of the same distribution; equivalence is checked on the moments.)
+
+**Effort: medium. Impact: high. Risk: medium (swaps the sampling kernel — moment
+equivalence checked against the pinv reference).**
 
 ### 3. `draw_beta` — `eigen` of the full kron, recomputed inside the rejection loop
 `gibbs_var_steps.jl:149`
@@ -111,7 +126,7 @@ Low priority next to 1-4.
 | Step | Change | Effort | Impact |
 |------|--------|--------|--------|
 | 1 | Cycle-only Lyapunov solve (drop full-system `pinv`) | low | very high |
-| 2 | Route `sample_states` to the Cholesky filter/smoother | medium | high |
+| 2 | Cholesky filter/smoother in `carter_kohn_algorythm.jl` (DONE) | medium | high |
 | 3 | `draw_beta`: kron-factor once, outside rejection loop | low | high |
 | 4 | Build model once, mutate cycle/cov blocks in place | medium | medium |
 | 5 | Precompute `Q`, fix slice layout (folded into 2) | low | medium |

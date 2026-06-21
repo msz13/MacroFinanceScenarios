@@ -12,6 +12,31 @@ function eigen_sqrt(A::AbstractMatrix)
 end
 
 """
+    chol_psd(A) -> Cholesky
+
+Cholesky factorization of the symmetric, positive-semidefinite matrix `A`, used
+in place of `pinv` for the Kalman/Carter-Kohn linear solves. `A` is symmetrized
+first; if the bare factorization fails (the observation noise is `H = eps()*I`,
+which leaves the innovation covariance numerically near-singular) a small
+trace-scaled jitter is added so the factorization stays robust.
+
+Use `A_inv_solve = B / chol_psd(A)` for `B*A⁻¹` and `chol_psd(A).L` as a matrix
+square root for sampling `mean + chol_psd(cov).L * randn(n)`.
+"""
+function chol_psd(A::AbstractMatrix)
+    A_sym = Symmetric((A + A') / 2)
+    F = cholesky(A_sym; check = false)
+    issuccess(F) && return F
+    jitter = sqrt(eps()) * (tr(A_sym) / size(A_sym, 1) + 1.0)
+    return cholesky(A_sym + jitter * I; check = false)
+end
+
+"""Draw one sample from N(`mean`, `cov`) via a robust Cholesky factor (see
+[`chol_psd`](@ref)), replacing the eigendecomposition-based `eigen_sqrt` path."""
+sample_mvn(mean::AbstractVector, cov::AbstractMatrix) =
+    mean + chol_psd(cov).L * randn(length(mean))
+
+"""
 Kalman Filter implementation
 Returns filtered states, covariances, predicted states, and predicted covariances
 """
@@ -29,20 +54,23 @@ function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missin
     # Initialize
     state_current = model.initial_state_mean
     covariance_current = model.initial_state_covariance
-    
+
+    # Additive process noise R*Q*R' is constant across time; compute it once.
+    RQR = model.R * model.Q * model.R'
+
     for t in 1:n_time_steps
         # Prediction step
         if t == 1
             state_predicted_t = model.T * state_current
-            covariance_predicted_t = model.T * covariance_current * model.T' + model.R * model.Q * model.R'
+            covariance_predicted_t = model.T * covariance_current * model.T' + RQR
         else
             state_predicted_t = model.T * state_filtered[t-1, :]
-            covariance_predicted_t = model.T * reshape(covariance_filtered[t-1, :, :], n_states, n_states) * model.T' + model.R * model.Q * model.R'
+            covariance_predicted_t = model.T * reshape(covariance_filtered[t-1, :, :], n_states, n_states) * model.T' + RQR
         end
-        
+
         state_predicted[t, :] = state_predicted_t
         covariance_predicted[t, :, :] = covariance_predicted_t
-        
+
         # Update step using only the observed (non-missing) series at time t
         y_t = observations[t, :]
         obs_idx = findall(!ismissing, y_t)
@@ -56,8 +84,9 @@ function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missin
             innovation = y - Z_t * state_predicted_t
             innovation_covariance = Z_t * covariance_predicted_t * Z_t' + H_t
 
-            # Kalman gain
-            kalman_gain = covariance_predicted_t * Z_t' * pinv(innovation_covariance)
+            # Kalman gain via a Cholesky solve (P Z' S⁻¹) instead of pinv(S).
+            S = chol_psd(innovation_covariance)
+            kalman_gain = (covariance_predicted_t * Z_t') / S
 
             # Filtered state and covariance (Joseph form for numerical stability)
             state_filtered[t, :] = state_predicted_t + kalman_gain * innovation
@@ -148,24 +177,24 @@ function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{
         kalman_filter(model, observations)
                 
     state_smoothed_current = zeros(n_time_steps, n_states)
-        
+
     # Sample final state from filtered distribution at T
     final_state_mean = state_filtered[end, :]
     final_state_covariance = covariance_filtered[end, :, :]
-    state_smoothed_current[end, :] = final_state_mean + eigen_sqrt(final_state_covariance) * randn(n_states)
-        
+    state_smoothed_current[end, :] = sample_mvn(final_state_mean, final_state_covariance)
+
     # Backward pass: sample states from T-1 down to 1
     for t in (n_time_steps-1):-1:1
         # Get filtered estimates at time t
         state_filtered_t = state_filtered[t, :]
         covariance_filtered_t = covariance_filtered[t, :, :]
-           
+
         # Get predicted estimates at time t+1
         state_predicted_t_plus_1 = state_predicted[t+1, :]
         covariance_predicted_t_plus_1 = covariance_predicted[t+1, :, :]
-            
-        # Compute smoothing gain matrix
-        smoothing_gain = covariance_filtered_t * model.T' * pinv(covariance_predicted_t_plus_1)
+
+        # Compute smoothing gain matrix via a Cholesky solve instead of pinv.
+        smoothing_gain = (covariance_filtered_t * model.T') / chol_psd(covariance_predicted_t_plus_1)
 
         # Conditional mean and covariance for state at time t given state at t+1
         state_smoothed_mean = state_filtered_t +
@@ -174,13 +203,13 @@ function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{
         covariance_smoothed = covariance_filtered_t - smoothing_gain * model.T * covariance_filtered_t
 
         # Sample state at time t
-        state_smoothed_current[t, :] = state_smoothed_mean + eigen_sqrt(covariance_smoothed) * randn(n_states)
+        state_smoothed_current[t, :] = sample_mvn(state_smoothed_mean, covariance_smoothed)
     end
 
     # Draw the initial state (t = 0) conditional on the sampled state at t = 1,
     # using the prior moments (initial_state_mean / covariance) as the "filtered"
     # estimate at t = 0 and the predicted moments at t = 1.
-    initial_smoothing_gain = model.initial_state_covariance * model.T' * pinv(covariance_predicted[1, :, :])
+    initial_smoothing_gain = (model.initial_state_covariance * model.T') / chol_psd(covariance_predicted[1, :, :])
 
     initial_state_mean = model.initial_state_mean +
         initial_smoothing_gain * (state_smoothed_current[1, :] - state_predicted[1, :])
@@ -188,7 +217,7 @@ function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{
     initial_state_covariance = model.initial_state_covariance -
         initial_smoothing_gain * model.T * model.initial_state_covariance
 
-    initial_state = initial_state_mean + eigen_sqrt(initial_state_covariance) * randn(n_states)
+    initial_state = sample_mvn(initial_state_mean, initial_state_covariance)
 
     return initial_state, state_smoothed_current
 

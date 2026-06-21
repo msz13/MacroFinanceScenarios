@@ -95,18 +95,22 @@ Stationary (unconditional) state covariance implied by the full transition matri
 `model.T` and state-noise covariance `model.Q`, restricted to the cycle block.
 
 Solves the discrete Lyapunov equation `P = T·P·T' + Q` in vectorised form,
-`vec(P) = (I − T⊗T)⁻¹ vec(Q)`, using the *full* transition and noise matrices so
-the trend–cycle interactions are accounted for. The full transition contains the
-non-stationary trend (random-walk) block, so `I − T⊗T` is singular; the
-Moore–Penrose pseudoinverse is used, mirroring the MATLAB reference
-`pinv(I − kron(A,A)) * Q(:)`. Only the cycle block (rows/cols `n_trends+1:end`) is
-returned, since the trend initialisation is kept at its prior value.
+`vec(P) = (I − T⊗T)⁻¹ vec(Q)`, restricted to the **cycle** block only.
+
+The trend block of `model.T` is a decoupled random walk, so the full `I − T⊗T` is
+singular and the trend initialisation is kept at its prior value anyway. The cycle
+companion block, by contrast, is guaranteed stable (enforced by the stationarity
+rejection in `sample_var_params`), so `I − Tc⊗Tc` is invertible and an ordinary
+solve replaces the Moore–Penrose pseudoinverse of the full `n_states²` system.
+This drops the dimension from `n_states²` to `n_cycle_states²` and the SVD to an LU
+solve.
 """
 function stationary_cycle_covariance(model::StateSpaceModel, n_trends)
-    n_states = size(model.T, 1)
-    vecP = pinv(I - kron(model.T, model.T)) * vec(model.Q)
-    P = reshape(vecP, n_states, n_states)
-    return P[n_trends+1:end, n_trends+1:end]
+    Tc = model.T[n_trends+1:end, n_trends+1:end]
+    Qc = model.Q[n_trends+1:end, n_trends+1:end]
+    n_cycle_states = size(Tc, 1)
+    vecP = (I - kron(Tc, Tc)) \ vec(Qc)
+    return reshape(vecP, n_cycle_states, n_cycle_states)
 end
 
 """
