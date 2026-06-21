@@ -146,21 +146,36 @@ posterior_beta_coefficient_mean(Y, X, beta_mean, Ω_inv) = inv(X'X + Ω_inv)*(X'
 
 #Ω_inv prior of beta coefficient variance
 
-function draw_beta(X, Σ, beta_posterior, Ω_inv)
+"""
+    beta_cholesky_factor(X, Σ, Ω_inv) -> L
 
-    n = size(Σ, 1)      # number of equations
-    k = size(X, 2)      # number of predictors (n * p)
-    m = n * k           # length of vec(β)
+Lower-triangular Cholesky factor `L` of the coefficient posterior covariance
+`Σ ⊗ (X'X + Ω_inv)⁻¹` (so `L * L' ≈` that covariance).
 
-    beta_var = kron(Σ, inv(X'X + Ω_inv)) + I(m) * 1e-5
+Uses the identity that the Cholesky factor of a Kronecker product is the
+Kronecker product of the factors:
 
-    F = eigen(Hermitian(beta_var))
-    λ = max.(F.values, 0.0)
-    L = F.vectors * Diagonal(sqrt.(λ))
+    chol(A ⊗ B) = chol(A) ⊗ chol(B)
 
-    return vec(beta_posterior) + L * randn(m)
-
+so the `m × m` factor (`m = n·k`) is assembled from the small `n × n` and
+`k × k` blocks instead of decomposing the full matrix. Because this factor does
+not depend on the proposed `β`, it is computed once and reused across the
+stationarity-rejection draws in [`sample_var_params`](@ref).
+"""
+function beta_cholesky_factor(X, Σ, Ω_inv)
+    jitter = 1e-5
+    Σ_L = cholesky(Symmetric(Σ) + jitter * I).L                 # n × n
+    V_L = cholesky(Symmetric(inv(Symmetric(X'X + Ω_inv))) + jitter * I).L  # k × k
+    return kron(Σ_L, V_L)
 end
+
+"""
+    draw_beta(beta_posterior, L) -> vec(β)
+
+Draw `vec(β) ~ N(vec(beta_posterior), L L')` from the precomputed Cholesky
+factor `L` returned by [`beta_cholesky_factor`](@ref).
+"""
+draw_beta(beta_posterior, L) = vec(beta_posterior) + L * randn(size(L, 1))
 
 
 function covariance_posterior_dist(Y, X, β_posterior_μ, posterior_df, variance_prior, β_prior_μ, Ω_inv)
@@ -215,14 +230,18 @@ function sample_var_params(data, p, β_prior_μ, Ω_inv, S, df; max_draws::Int =
 
     Σ = rand(covariance_posterior_dist(Y, X, β_hat, df, S, β_prior_μ, Ω_inv))
 
-    β = draw_beta(X, Σ, β_hat, Ω_inv)
+    # Σ and X are fixed across rejection draws, so factor the proposal covariance
+    # once and reuse it.
+    L = beta_cholesky_factor(X, Σ, Ω_inv)
+    β = draw_beta(β_hat, L)
 
     # Companion bottom block A = B' (n × n*p) in oldest-lag-first ordering.
     var_coeff(β) = collect(reshape(β, n * p, n)')
 
     draws = 1
     while !is_stationary(var_coeff(β), n, p) && draws < max_draws
-        β = draw_beta(X, Σ, β_hat, Ω_inv)
+      
+        β = draw_beta(β_hat, L)
         draws += 1
     end
 
