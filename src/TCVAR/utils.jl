@@ -1,28 +1,7 @@
+using StatsBase
+using PrettyTables
+using TimeSeries
 
-function prepare_var_data(Y::Matrix{Float64}, p::Int, X::Union{Matrix{Float64},Vector{Float64}} = Matrix{Float64}(undef, 0, 0), add_intercept::Bool = false)
-    T, n = size(Y)
-    Y_lagged = zeros(T - p, n * p)
-    for t in (p + 1):T
-        Y_lagged[t - p, :] = Y[t-p:t-1, :]'
-    end
-
-    predictors = Y_lagged
-
-    if !isempty(X)
-        if size(X, 1) != T
-            error("The number of rows in X must be equal to the number of rows in Y.")
-        end
-        X_subset = X[p+1:end, :]
-        predictors = hcat(predictors, X_subset)
-    end
-
-    if add_intercept
-        intercept = ones(T - p, 1)
-        predictors = hcat(intercept, predictors)
-    end
-
-    return Y[p+1:end, :], predictors
-end
 
 function max_drawdown_and_length(returns::Matrix{Float64})
     # returns: Matrix where each column is a scenario, each row a time step
@@ -204,4 +183,99 @@ function print_scenarios_percentiles(scenarios, perc, periods_names, title="")
         simulation_perc[t,:] = quantile(scenarios[t,:],perc)
     end
     pretty_table(round.(simulation_perc, digits=4), backend = Val(:html),header=perc, row_labels=periods_names, title=title)
+end
+
+function girf(B::Matrix{Float64}, Σ::Matrix{Float64}, h::Int, shock_var::Int, shock_value)
+    """
+    Generalized Impulse Response Function (GIRF) for VAR models
+    
+    Parameters:
+    -----------
+    B : Matrix{Float64}
+        VAR coefficient matrix of size (K, K*p) where K is number of variables
+        and p is the lag order. Contains [A₁ A₂ ... Aₚ]
+    Σ : Matrix{Float64}
+        Residual covariance matrix of size (K, K)
+    h : Int
+        Number of periods (horizon) for impulse response
+    shock_var : Int
+        Index of the variable to be shocked (1 to K)
+    
+    Returns:
+    --------
+    Matrix{Float64}
+        GIRF matrix of size (h+1, K) where each row represents the response
+        at time t, and each column represents a different variable
+    """
+    
+    K = size(Σ, 1)  # Number of variables
+    p = size(B, 2) ÷ K  # Lag order
+    
+    # Initialize GIRF matrix
+    girf_matrix = zeros(h + 1, K)
+    
+    # Shock size: one standard deviation shock scaled by covariance
+    σⱼ = sqrt(Σ[shock_var, shock_var])
+    eⱼ = zeros(K)
+    eⱼ[shock_var] = shock_value
+    
+    # Generalized impulse: Σ * eⱼ / σⱼ
+    shock = Σ * eⱼ / σⱼ
+    
+    # Period 0: immediate impact
+    girf_matrix[1, :] = shock
+    
+    # Compute companion form if p > 1
+    if p > 1
+        # Companion matrix
+        F = zeros(K * p, K * p)
+        F[1:K, :] = B
+        F[K+1:end, 1:K*(p-1)] = I(K * (p - 1))
+        
+        # Extended shock vector
+        shock_extended = vcat(shock, zeros(K * (p - 1)))
+        
+        # Iterate through horizons
+        state = shock_extended
+        for t in 1:h
+            state = F * state
+            girf_matrix[t + 1, :] = state[1:K]
+        end
+    else
+        # Simple VAR(1) case
+        state = shock
+        for t in 1:h
+            state = B * state
+            girf_matrix[t + 1, :] = state
+        end
+    end
+    
+    return girf_matrix
+end
+
+function calculate_equity_returns(div_growth, dp)
+    
+    pd_growth = diff(-dp, dims=1)
+
+    return  pd_growth .+ div_growth[2:end,:] ./100 + log.(1 .+ exp.(dp[2:end,:]))
+       
+
+end
+
+
+"""
+yelds_scenarios: matrix of yelds returns 
+T: maturity
+t: frequency of analises
+"""
+function calculate_bond_returns(yelds_scenarios, T, t)
+
+    yt = yelds_scenarios[2:end,:]
+    ytm1 = yelds_scenarios[1:end-1,:]
+
+    A = ytm1 ./ t
+    C = 1 ./( (1 .+ yt ./2).^(2*(T-1 ./ t)))
+    B = ytm1 ./ yt .* (1 .- C)
+    
+    return A .+ B .+ C .-1 
 end
