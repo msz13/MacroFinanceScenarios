@@ -78,6 +78,13 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
     initial_cycle_mean = repeat(priors.initial_cycle_mean, p)
     initial_cycle_covariance = kron(Matrix(I, p, p), cycle_covariance_mean)
 
+    # Full initial-state distribution (trend block then cycle companion). The mean
+    # is constant across draws; the cycle block of the covariance is re-initialised
+    # from the implied stationary distribution after each parameter update below.
+    initial_state_mean = [priors.initial_trend_mean; initial_cycle_mean]
+    initial_state_covariance = [priors.initial_trend_covariance   zeros(n_trends, n_obs*p)
+                                zeros(n_obs*p, n_trends)           initial_cycle_covariance]
+
     # Storage for sampled states and variables (states include the pre-sample)
     trends_states = zeros(n_draws, n_trend_time_steps, n_trends)
     cycle_states = zeros(n_draws, n_cycle_time_steps, n_obs)
@@ -92,23 +99,23 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
     betas[1, :] = vec([zeros(n_obs*(p-1), n_obs); Matrix(I(n_obs))])
     sigmas[1, :, :] = cycle_covariance_mean
 
-    # Build the state space model from the initial (prior) parameter values; it is
-    # rebuilt with the freshly drawn parameters at the end of every draw.
-    model = tc_var(
-                trend_mapping,
+    # Build the state space model skeleton (constant structure, zero draw-dependent
+    # blocks), then set the initial (prior) parameter values; the draw-dependent
+    # blocks are refreshed with newly drawn parameters at the end of every draw.
+    model = tc_var(trend_mapping; p = p)
+    update_tc_var!(
+                model,
                 collect(reshape(betas[1, :], k, n_obs)'),
                 trend_covariance[1, :, :],
                 sigmas[1, :, :],
-                priors.initial_trend_mean,
-                initial_cycle_mean,
-                priors.initial_trend_covariance,
-                initial_cycle_covariance;
-                p = p)
+                n_trends,
+                n_obs,
+                p)
 
 
     for s in 2:n_draws
 
-        trends_states[s,:,:], cycle_states[s,:,:] = sample_states(model, data, n_trends, n_obs; p = p)
+        trends_states[s,:,:], cycle_states[s,:,:] = sample_states(model, data, initial_state_mean, initial_state_covariance, n_trends, n_obs; p = p)
 
         trend_covariance[s, :, :] = rand(covariance_posterior(trends_states[s,:,:], trend_covariance_scale, dτ_post))
 
@@ -126,6 +133,12 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
                     n_trends,
                     n_obs,
                     p)
+
+        # Re-initialise the cycle block of the initial covariance from the implied
+        # stationary distribution of the just-updated VAR dynamics (the trend block
+        # is kept fixed at its prior value). Previously done inside update_tc_var!.
+        initial_state_covariance[n_trends+1:end, n_trends+1:end] =
+            stationary_cycle_covariance(model, n_trends)
 
         logging && s % 2000 == 0 && println("Gibbs sampler: draw $s of $n_draws")
 

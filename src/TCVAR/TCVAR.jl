@@ -19,6 +19,7 @@ include("model_visualisation.jl")
 include("utils.jl")
 
 export tc_var, sample
+export prepare_var_data #TODO remove and use in sample function
 export plot_variable_states
 export gibbs_sampler, MinnesotaPrior
 export carter_kohn_sampler

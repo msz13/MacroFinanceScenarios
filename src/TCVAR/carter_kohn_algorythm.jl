@@ -40,20 +40,20 @@ sample_mvn(mean::AbstractVector, cov::AbstractMatrix) =
 Kalman Filter implementation
 Returns filtered states, covariances, predicted states, and predicted covariances
 """
-function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missing, Float64}})
+function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missing, Float64}}, initial_state_mean::Vector{Float64}, initial_state_covariance::Matrix{Float64})
     n_time_steps, n_obs = size(observations)
     n_states = size(model.T, 1)
-    
+
     # Storage for results
     state_filtered = zeros(n_time_steps, n_states)
     covariance_filtered = zeros(n_time_steps, n_states, n_states)
     state_predicted = zeros(n_time_steps, n_states)
     covariance_predicted = zeros(n_time_steps, n_states, n_states)
     log_likelihood = 0.0
-    
+
     # Initialize
-    state_current = model.initial_state_mean
-    covariance_current = model.initial_state_covariance
+    state_current = initial_state_mean
+    covariance_current = initial_state_covariance
 
     # Additive process noise R*Q*R' is constant across time; compute it once.
     RQR = model.R * model.Q * model.R'
@@ -110,13 +110,13 @@ Carter-Kohn Algorithm for sampling smoothed states
 This algorithm samples from the joint posterior distribution of all states
 given all observations using backward simulation
 """
-function carter_kohn_sampler2(model::StateSpaceModel, observations::Matrix{Union{Missing,Float64}}; n_samples::Int=1000)
+function carter_kohn_sampler2(model::StateSpaceModel, observations::Matrix{Union{Missing,Float64}}, initial_state_mean, initial_state_covariance; n_samples::Int=1000)
     n_time_steps, n_obs = size(observations)
     n_states = size(model.T, 1)
-    
+
     # Run Kalman filter forward pass
-    state_filtered, covariance_filtered, state_predicted, covariance_predicted, _ = 
-        kalman_filter(model, observations)
+    state_filtered, covariance_filtered, state_predicted, covariance_predicted, _ =
+        kalman_filter(model, observations, initial_state_mean, initial_state_covariance)
     
     # Storage for sampled states
     state_smoothed_samples = zeros(n_samples, n_time_steps, n_states)
@@ -168,13 +168,13 @@ Carter-Kohn Algorithm for sampling smoothed states
 This algorithm samples from the joint posterior distribution of all states
 given all observations using backward simulation
 """
-function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{Missing, Float64}})
+function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{Missing, Float64}}, initial_state_mean, initial_state_covariance)
     n_time_steps, n_obs = size(observations)
     n_states = size(model.T, 1)
-    
+
     # Run Kalman filter forward pass
-    state_filtered, covariance_filtered, state_predicted, covariance_predicted, _ = 
-        kalman_filter(model, observations)
+    state_filtered, covariance_filtered, state_predicted, covariance_predicted, _ =
+        kalman_filter(model, observations, initial_state_mean, initial_state_covariance)
                 
     state_smoothed_current = zeros(n_time_steps, n_states)
 
@@ -209,15 +209,15 @@ function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{
     # Draw the initial state (t = 0) conditional on the sampled state at t = 1,
     # using the prior moments (initial_state_mean / covariance) as the "filtered"
     # estimate at t = 0 and the predicted moments at t = 1.
-    initial_smoothing_gain = (model.initial_state_covariance * model.T') / chol_psd(covariance_predicted[1, :, :])
+    initial_smoothing_gain = (initial_state_covariance * model.T') / chol_psd(covariance_predicted[1, :, :])
 
-    initial_state_mean = model.initial_state_mean +
+    initial_smoothed_mean = initial_state_mean +
         initial_smoothing_gain * (state_smoothed_current[1, :] - state_predicted[1, :])
 
-    initial_state_covariance = model.initial_state_covariance -
-        initial_smoothing_gain * model.T * model.initial_state_covariance
+    initial_smoothed_covariance = initial_state_covariance -
+        initial_smoothing_gain * model.T * initial_state_covariance
 
-    initial_state = sample_mvn(initial_state_mean, initial_state_covariance)
+    initial_state = sample_mvn(initial_smoothed_mean, initial_smoothed_covariance)
 
     return initial_state, state_smoothed_current
 
@@ -227,9 +227,9 @@ end
 
 #TODO sprawdizc cze reshape beta jest dobre
 
-function sample_states(model::StateSpaceModel, data, n_trends, n_observations; p::Int = 1)
+function sample_states(model::StateSpaceModel, data, initial_state_mean, initial_state_covariance, n_trends, n_observations; p::Int = 1)
 
-        initial_state, state_smoothed_samples = carter_kohn_sampler(model, data)
+        initial_state, state_smoothed_samples = carter_kohn_sampler(model, data, initial_state_mean, initial_state_covariance)
 
         # Cycle companion is ordered oldest-lag-first; the contemporaneous cycle
         # c_t is the last block of size n_observations.

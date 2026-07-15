@@ -13,6 +13,6 @@ function local_level_ARMA()
 
     G = [1, 0, 1, 0]
 
-    return StateSpaceModel(T, R, Z, Q, H, initial_state_mean, initial_state_covariance)
+    return StateSpaceModel(T, R, Z, Q, H)
     
 end

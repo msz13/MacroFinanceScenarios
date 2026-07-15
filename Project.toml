@@ -5,6 +5,8 @@ authors = ["Your Name"]
 
 [deps]
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+FlexiChains = "4a37a8b9-6e57-4b92-8664-298d46e639f7"
 MCMCChains = "c7f686f2-ff18-58e9-bc7b-31028e88f75d"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PrettyTables = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
@@ -15,6 +17,8 @@ XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
 
 [compat]
 DataFrames = "1.8.2"
+Distributions = "0.25.127"
+FlexiChains = "0.6.31"
 MCMCChains = "7.7.0"
 Plots = "1.41.6"
 PrettyTables = "3.3.2"
