@@ -7,23 +7,84 @@ function covariance_posterior(data, scale_prior, d_posterior)
 
 end
 
-coeff_names(n_coeffs) = ["β$i" for i in 1:n_coeffs]
-cycle_covariance_names(n_variables) = ["Σc$i" for i in 1:n_variables*n_variables]
-trend_covariance_names(n_variables) = ["Στ$i" for i in 1:n_variables*n_variables]
+"""
+    TCVarResult
+
+Posterior sampling result returned by [`gibbs_sampler`](@ref).
+
+# Fields
+- `model::TCVAR` : the sampled model, with the draw-dependent state-space blocks
+  reset to their empty (zero) skeleton values
+- `params::FlexiChain{Symbol}` : posterior parameter draws — `Στ` (trend
+  innovation covariance, `n_trends × n_trends`), `β` (cycle VAR coefficients,
+  `n_obs*p × n_obs`, predictors stacked oldest-lag-first) and `Σc` (cycle
+  innovation covariance, `n_obs × n_obs`), each stored as a matrix-valued
+  parameter
+- `trend_states` : `n_kept × (T+1) × n_trends` array of sampled trend states
+  (includes the initial state at t = 0)
+- `cycle_states` : `n_kept × (T+p) × n_obs` array of sampled cycle states
+  (includes the p pre-sample periods)
+"""
+struct TCVarResult
+    model::TCVAR
+    params::FlexiChain{Symbol}
+    trend_states::Array{Float64,3}
+    cycle_states::Array{Float64,3}
+end
+
+"""
+    build_result(model, trend_states, cycle_states, trend_covariance, betas, sigmas, burnin, thin)
+
+Transform the raw Gibbs draws into a [`TCVarResult`](@ref): drop the burn-in,
+thin, concatenate the flattened parameter draws (`trend_covariance`, `betas`,
+`sigmas`) into a single `FlexiChain` with matrix-valued parameters `Στ`, `β`
+and `Σc`, and reset the model's draw-dependent state-space blocks to zero so
+the returned model carries the empty skeleton.
+"""
+function build_result(model::TCVAR, trend_states, cycle_states, trend_covariance, betas, sigmas, burnin, thin)
+
+    n_trends = size(trend_covariance, 2)
+    n_obs = size(sigmas, 2)
+    k = size(betas, 2) ÷ n_obs # number of var coefficients per equation (lags stacked)
+    p = k ÷ n_obs
+
+    kept = burnin+1:thin:size(betas, 1)
+    n_kept = length(kept)
+
+    # One (iters × chains × params) array: each sample's matrix is flattened
+    # column-major, so the FlexiChain key spec below reshapes it back exactly.
+    params_array = reshape(
+        hcat(reshape(trend_covariance[kept, :, :], n_kept, :),
+             betas[kept, :],
+             reshape(sigmas[kept, :, :], n_kept, :)),
+        n_kept, 1, :)
+
+    params = FlexiChain{Symbol}(params_array, (
+        Parameter(:Στ) => (n_trends, n_trends),
+        Parameter(:β) => (k, n_obs),
+        Parameter(:Σc) => (n_obs, n_obs)))
+
+    # Return the model with empty params: zero the draw-dependent blocks the
+    # sampler filled in, restoring the skeleton built by tc_var.
+    update_tc_var!(model.ssm, zeros(n_obs, k), zeros(n_trends, n_trends),
+                   zeros(n_obs, n_obs), n_trends, n_obs, p)
+
+    return TCVarResult(model, params, trend_states[kept, :, :], cycle_states[kept, :, :])
+
+end
 
 
 """
+    model::TCVAR: trend-cycle VAR model bundling the state-space skeleton, the
+        trend / initial-state priors (with the cycle `MinnesotaPrior` under
+        `priors.cycle`) and the variable / trend names (see [`TCVAR`](@ref)).
     data: T x m matrix of observations
-    trend_mapping: m x n_trends mapping of trends to observations
-    priors: NamedTuple of trend / initial-state priors with fields
-        `initial_trend_mean`, `initial_cycle_mean`, `initial_trend_covariance`,
-        `trend_covariance_df`, `trend_covariance_mean`.
-    cycle_prior::MinnesotaPrior: Minnesota prior for the cycle VAR. Its `n` must
-        equal the number of observed variables and its `p` sets the number of
-        cycle VAR lags.
     n_samples: number of retained samples
     burnin: number of samples to discard
     thin: keep every `thin`-th sample
+
+Returns a [`TCVarResult`](@ref) bundling the (skeleton-reset) model, the
+parameter draws as one `FlexiChain` and the sampled trend / cycle states.
 
 The cycle is mean-zero, so the prior's intercept row is dropped. `MinnesotaPrior`
 orders its regressors newest-lag-first (`[lag1 … lagp, const]`), whereas the
@@ -33,10 +94,14 @@ Giannone–Lenza–Primiceri parameterization `Σ ~ IW(Ψ, d)`, the prior IW sca
 `Ψ` directly.
 """
 
-function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior; burnin = 1000, n_samples=1000, thin=1, logging=false)
+function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1, logging=false)
+
+    priors = model.priors
+    cycle_prior = priors.cycle
+    ssm = model.ssm
 
     n_time_steps, n_obs = size(data)
-    n_trends = size(trend_mapping, 2)
+    n_trends = length(model.trend_names)
     p = cycle_prior.p
     k = n_obs * p #number of var coefficients per equation (lags stacked)
 
@@ -49,7 +114,7 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
     n_cycle_time_steps = n_time_steps + p
 
     n_obs == cycle_prior.n ||
-        throw(DimensionMismatch("cycle_prior.n = $(cycle_prior.n) must match the number of observed variables $n_obs"))
+        throw(DimensionMismatch("data has $n_obs variables but the model was built for $(cycle_prior.n)"))
 
     n_draws = burnin + n_samples
 
@@ -99,12 +164,12 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
     betas[1, :] = vec([zeros(n_obs*(p-1), n_obs); Matrix(I(n_obs))])
     sigmas[1, :, :] = cycle_covariance_mean
 
-    # Build the state space model skeleton (constant structure, zero draw-dependent
-    # blocks), then set the initial (prior) parameter values; the draw-dependent
-    # blocks are refreshed with newly drawn parameters at the end of every draw.
-    model = tc_var(trend_mapping; p = p)
+    # The model carries the state space skeleton (constant structure, zero
+    # draw-dependent blocks); set the initial (prior) parameter values here, then
+    # refresh the draw-dependent blocks with newly drawn parameters at the end of
+    # every draw.
     update_tc_var!(
-                model,
+                ssm,
                 collect(reshape(betas[1, :], k, n_obs)'),
                 trend_covariance[1, :, :],
                 sigmas[1, :, :],
@@ -115,7 +180,7 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
 
     for s in 2:n_draws
 
-        trends_states[s,:,:], cycle_states[s,:,:] = sample_states(model, data, initial_state_mean, initial_state_covariance, n_trends, n_obs; p = p)
+        trends_states[s,:,:], cycle_states[s,:,:] = sample_states(ssm, data, initial_state_mean, initial_state_covariance, n_trends, n_obs; p = p)
 
         trend_covariance[s, :, :] = rand(covariance_posterior(trends_states[s,:,:], trend_covariance_scale, dτ_post))
 
@@ -126,7 +191,7 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
         # covariance blocks, and the re-initialised cycle initial covariance)
         # instead of rebuilding the whole StateSpaceModel.
         update_tc_var!(
-                    model,
+                    ssm,
                     collect(reshape(betas[s, :], k, n_obs)'),
                     trend_covariance[s, :, :],
                     sigmas[s, :, :],
@@ -138,18 +203,12 @@ function gibbs_sampler(data, trend_mapping, priors, cycle_prior::MinnesotaPrior;
         # stationary distribution of the just-updated VAR dynamics (the trend block
         # is kept fixed at its prior value). Previously done inside update_tc_var!.
         initial_state_covariance[n_trends+1:end, n_trends+1:end] =
-            stationary_cycle_covariance(model, n_trends)
+            stationary_cycle_covariance(ssm, n_trends)
 
         logging && s % 2000 == 0 && println("Gibbs sampler: draw $s of $n_draws")
 
     end
 
-    t_trends_states = trends_states[burnin+1:thin:end, :, :]
-    t_cycle_states =  cycle_states[burnin+1:thin:end, :, :]
-    t_trend_covariance = Chains(reshape(trend_covariance[burnin+1:thin:end,:,:], n_samples÷thin, n_trends*n_trends, 1), trend_covariance_names(n_trends))
-    t_betas = Chains(betas[burnin+1:thin:end,:,:], coeff_names(n_obs*k))
-    t_sigmas = Chains(reshape(sigmas[burnin+1:thin:end,:,:], n_samples÷thin, n_obs*n_obs, 1), cycle_covariance_names(n_obs))
-
-    return t_trends_states, t_cycle_states, t_trend_covariance, t_betas, t_sigmas
+    return build_result(model, trends_states, cycle_states, trend_covariance, betas, sigmas, burnin, thin)
 
 end

@@ -83,6 +83,62 @@ function tc_var(trend_mapping; p::Int = 1)
 
 end
 
+default_variable_names(n_variables) = ["y$i" for i in 1:n_variables]
+default_trend_names(n_trends) = ["τ$i" for i in 1:n_trends]
+
+"""
+    TCVAR
+
+Trend-cycle VAR model: bundles the state-space skeleton built by [`tc_var`](@ref)
+with the priors and the observation-variable / trend names, so the sampler
+receives one ready-made model instead of building the skeleton itself.
+
+# Fields
+- `ssm::StateSpaceModel` : state-space skeleton (draw-dependent blocks start at
+  zero and are filled by [`update_tc_var!`](@ref) during sampling)
+- `priors::NamedTuple` : one Distributions.jl prior per parameter name —
+  `initial_trend::MvNormal` (initial trend state), `trend_covariance::InverseWishart`
+  (trend innovation covariance) — plus the cycle `MinnesotaPrior` under the key
+  `cycle`. The initial cycle state is mean-zero by model assumption and carries
+  no user prior.
+- `variable_names::Vector{String}` : names of the observed variables
+- `trend_names::Vector{String}` : names of the trend states
+"""
+struct TCVAR
+    ssm::StateSpaceModel
+    priors::NamedTuple
+    variable_names::Vector{String}
+    trend_names::Vector{String}
+end
+
+"""
+    TCVAR(trend_mapping, priors, cycle_prior::MinnesotaPrior; variable_names, trend_names)
+
+Build a [`TCVAR`](@ref) model from an `m × n_trends` trend-to-observation
+mapping, the trend / initial-state priors and the cycle `MinnesotaPrior`
+(whose `n` must equal the number of observed variables `m` and whose `p` sets
+the number of cycle VAR lags). `variable_names` defaults to `["y1", …]` and
+`trend_names` to `["τ1", …]`.
+"""
+function TCVAR(trend_mapping, priors, cycle_prior::MinnesotaPrior;
+               variable_names = default_variable_names(size(trend_mapping, 1)),
+               trend_names = default_trend_names(size(trend_mapping, 2)))
+
+    n_obs, n_trends = size(trend_mapping)
+
+    n_obs == cycle_prior.n ||
+        throw(DimensionMismatch("cycle_prior.n = $(cycle_prior.n) must match the number of observed variables $n_obs"))
+    length(variable_names) == n_obs ||
+        throw(DimensionMismatch("variable_names must have length $n_obs"))
+    length(trend_names) == n_trends ||
+        throw(DimensionMismatch("trend_names must have length $n_trends"))
+
+    return TCVAR(tc_var(trend_mapping; p = cycle_prior.p),
+                 merge(priors, (cycle = cycle_prior,)),
+                 collect(String, variable_names),
+                 collect(String, trend_names))
+end
+
 """
     stationary_cycle_covariance(model::StateSpaceModel, n_trends)
 
