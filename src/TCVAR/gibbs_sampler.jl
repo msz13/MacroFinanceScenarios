@@ -27,7 +27,7 @@ Posterior sampling result returned by [`gibbs_sampler`](@ref).
 """
 struct TCVarResult
     model::TCVAR
-    params::FlexiChain{Symbol}
+    params::FlexiChain{VarName}
     trend_states::Array{Float64,3}
     cycle_states::Array{Float64,3}
 end
@@ -59,10 +59,10 @@ function build_result(model::TCVAR, trend_states, cycle_states, trend_covariance
              reshape(sigmas[kept, :, :], n_kept, :)),
         n_kept, 1, :)
 
-    params = FlexiChain{Symbol}(params_array, (
-        Parameter(:Στ) => (n_trends, n_trends),
-        Parameter(:β) => (k, n_obs),
-        Parameter(:Σc) => (n_obs, n_obs)))
+    params = FlexiChain{VarName}(params_array, (
+        Parameter(@varname(Στ)) => (n_trends, n_trends),
+        Parameter(@varname(β)) => (k, n_obs),
+        Parameter(@varname(Σc)) => (n_obs, n_obs)))
 
     # Return the model with empty params: zero the draw-dependent blocks the
     # sampler filled in, restoring the skeleton built by tc_var.
@@ -73,6 +73,75 @@ function build_result(model::TCVAR, trend_states, cycle_states, trend_covariance
 
 end
 
+
+"""
+    posterior_mean(result::TCVarResult)
+
+Posterior-mean parameter matrices averaged over the retained Gibbs draws, as a
+NamedTuple `(Στ, β, Σc)`:
+
+- `Στ` : trend innovation covariance, `n_trends × n_trends`
+- `β`  : cycle VAR coefficients, `n_obs*p × n_obs` (predictors oldest-lag-first)
+- `Σc` : cycle innovation covariance, `n_obs × n_obs`
+
+Each draw of a matrix-valued parameter is a matrix, so `mean` over the draws
+returns the posterior-mean matrix directly.
+"""
+posterior_mean(result::TCVarResult) = (
+    Στ = mean(result.params[@varname(Στ)]),
+    β  = mean(result.params[@varname(β)]),
+    Σc = mean(result.params[@varname(Σc)]),
+)
+
+"""
+    simulate_scenarios(result::TCVarResult, n_scenarios, n_steps)
+
+Draw `n_scenarios` forward simulations of length `n_steps` from the estimated
+trend-cycle VAR in `result`, using the [`sample`](@ref) state-space simulator.
+
+The model is instantiated at the **posterior-mean** parameters (`Στ`, `β`, `Σc`)
+returned by [`posterior_mean`](@ref); the draw-dependent state-space blocks of a
+private copy of `result.model.ssm` are filled via [`update_tc_var!`](@ref) so the
+model stored in `result` is left untouched. Every scenario starts from the common
+posterior-mean terminal state — the last smoothed trend state and the last `p`
+cycle states flattened oldest-lag-first (`ξ = [c_{t-p+1}; …; c_t]`) to match the
+cycle companion ordering — then evolves stochastically through `sample`.
+
+Returns `(states, observations)`:
+- `states::Array{Float64,3}`       : `n_scenarios × n_steps × n_states`
+- `observations::Array{Float64,3}` : `n_scenarios × n_steps × n_obs`
+"""
+function simulate_scenarios(result::TCVarResult, n_scenarios::Int, n_steps::Int)
+
+    params   = posterior_mean(result)
+    n_trends = size(params.Στ, 1)
+    n_obs    = size(params.Σc, 1)
+    k        = size(params.β, 1)      # n_obs * p
+    p        = k ÷ n_obs
+
+    # Instantiate the state-space model at the posterior-mean parameters on a
+    # private copy of the skeleton (the model in `result` keeps its zero blocks).
+    # var_coeff is β' — the n_obs × k companion bottom block.
+    ssm = deepcopy(result.model.ssm)
+    update_tc_var!(ssm, collect(params.β'), params.Στ, params.Σc, n_trends, n_obs, p)
+
+    # Common start state: posterior-mean last trend state, then the posterior-mean
+    # last p cycle states stacked oldest-lag-first to match the companion order.
+    trend_start = vec(mean(result.trend_states[:, end, :], dims = 1))
+    cycle_mean  = dropdims(mean(result.cycle_states, dims = 1), dims = 1)  # (T+p) × n_obs
+    cycle_start = vec(permutedims(cycle_mean[end-p+1:end, :]))
+    initial_state = [trend_start; cycle_start]
+
+    n_states = length(initial_state)
+    states       = zeros(n_scenarios, n_steps, n_states)
+    observations = zeros(n_scenarios, n_steps, n_obs)
+
+    for s in 1:n_scenarios
+        states[s, :, :], observations[s, :, :] = sample(ssm, initial_state, n_steps)
+    end
+
+    return states, observations
+end
 
 """
     model::TCVAR: trend-cycle VAR model bundling the state-space skeleton, the

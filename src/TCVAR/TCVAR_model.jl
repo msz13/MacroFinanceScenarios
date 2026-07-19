@@ -224,8 +224,8 @@ function sample(model:: StateSpaceModel, initial_state, n_steps)
     obs[1, :] = model.Z * states[1,:] .+ rand(MvNormal(zeros(n_variables), model.H))
     
     for t in 2:n_steps
-        states[t,:] = model.T * states[t-1,:] + rand(MvNormal(zeros(n_states), model.Q + I(n_variables) .* 1e-4))
-        obs[t, :] = model.Z * states[t,:] + rand(MvNormal(zeros(n_variables), model.H + I(n_steps) .* 1e-4))
+        states[t,:] = model.T * states[t-1,:] + rand(MvNormal(zeros(n_states), model.Q + I(n_states) .* 1e-4))
+        obs[t, :] = model.Z * states[t,:] + rand(MvNormal(zeros(n_variables), model.H + I(n_variables) .* 1e-4))
     end
 
     return states, obs

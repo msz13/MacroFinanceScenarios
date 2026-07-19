@@ -73,7 +73,7 @@ end
 function cor_returns(returns:: TimeArray)
     col = colnames(returns)
     corr = cor(values(returns))
-    return pretty_table(corr,header=col, backend = Val(:html), row_labels=col)
+    return pretty_table(corr, column_labels=col, backend = Val(:html), row_labels=col)
 end
 
 function annualise(scenarios:: Matrix, shift=2)
@@ -99,7 +99,7 @@ function print_percentiles(X, perc, freq=1, title="")
     for t in 1:years
         simulation_perc[:,t] = quantile(scenarios[:,t],perc)
     end
-    pretty_table(round.(simulation_perc, digits=4), backend = Val(:html),header=1:years, row_labels=perc, title=title)
+    pretty_table(round.(simulation_perc, digits=4), backend = Val(:html), column_labels=1:years, row_labels=perc, title=title)
 end
 
 
@@ -167,22 +167,22 @@ function print_scenarios_summary(scenarios:: Array{Float64, 3}, assets_names, pe
 
     end
 
-    pretty_table(round.(means, digits=4), backend = Val(:html), header=assets_names, row_labels = periods, title="Means")
-    pretty_table(round.(stds, digits=4), backend = Val(:html), header=assets_names, row_labels = periods, title="Standard devations")
-    pretty_table(round.(skew, digits=4), backend = Val(:html), header=assets_names, row_labels = periods, title="Skewness")
-    pretty_table(round.(kurt, digits=4), backend = Val(:html), header=assets_names, row_labels = periods, title="Kurtosis") 
+    pretty_table(round.(means, digits=4), backend = Val(:html), column_labels=assets_names, row_labels = periods, title="Means")
+    pretty_table(round.(stds, digits=4), backend = Val(:html), column_labels=assets_names, row_labels = periods, title="Standard devations")
+    pretty_table(round.(skew, digits=4), backend = Val(:html), column_labels=assets_names, row_labels = periods, title="Skewness")
+    pretty_table(round.(kurt, digits=4), backend = Val(:html), column_labels=assets_names, row_labels = periods, title="Kurtosis")
 
 end
 
 
 function print_scenarios_percentiles(scenarios, perc, periods_names, title="")
-    years = size(scenarios, 1)
+    years = size(scenarios, 2)
     simulation_perc = zeros(years, length(perc))
 
     for t in 1:years
-        simulation_perc[t,:] = quantile(scenarios[t,:],perc)
+        simulation_perc[t,:] = quantile(scenarios[:,t],perc)
     end
-    pretty_table(round.(simulation_perc, digits=4), backend = Val(:html),header=perc, row_labels=periods_names, title=title)
+    pretty_table(round.(simulation_perc, digits=4); backend = :html, column_labels=perc, row_labels=periods_names, title=title)
 end
 
 function girf(B::Matrix{Float64}, Σ::Matrix{Float64}, h::Int, shock_var::Int, shock_value)

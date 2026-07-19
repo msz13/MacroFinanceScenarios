@@ -23,9 +23,14 @@ export tc_var, sample
 export prepare_var_data #TODO remove and use in sample function
 export plot_variable_states
 export gibbs_sampler, MinnesotaPrior, TCVarResult
+export posterior_mean, simulate_scenarios
 export carter_kohn_sampler
 export compute_posterior_statistics
-export cum_returns_in_periods, print_scenarios_summary, print_scenarios_percentiles
+# utils.jl
+export max_drawdown_and_length, returns_summarystats, cor_returns, annualise
+export print_percentiles, sum_returns_between_periods, cum_returns_in_periods
+export print_scenarios_summary, print_scenarios_percentiles, girf
+export calculate_equity_returns, calculate_bond_returns
 
 #re-export from FlexiChains package
 export summarystats
