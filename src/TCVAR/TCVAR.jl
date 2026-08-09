@@ -13,15 +13,17 @@ using TimeSeries
 
 
 include("gibbs_var_steps.jl") # defines MinnesotaPrior, needed by the TCVAR constructor
+include("state_space.jl") # defines StateSpaceModel, used by TCVAR_model.jl
 include("TCVAR_model.jl")
 include("carter_kohn_algorythm.jl")
+include("tcvar_result.jl")
 include("gibbs_sampler.jl")
 include("model_visualisation.jl")
 include("utils.jl")
 
 export tc_var, sample
 export prepare_var_data #TODO remove and use in sample function
-export plot_variable_states
+export plot_variable_states, plot_states
 export gibbs_sampler, MinnesotaPrior, TCVarResult
 export posterior_mean, simulate_scenarios
 export carter_kohn_sampler
