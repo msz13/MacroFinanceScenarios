@@ -1,4 +1,4 @@
-"""
+#= """
     MinnesotaPrior{T}
 
 Conjugate Normal–Inverse-Wishart ("Minnesota") prior for a reduced-form BVAR,
@@ -102,7 +102,7 @@ function MinnesotaPrior(λ::Real, n::Integer, p::Integer,
     ω[k] = ωc_                              # loose intercept
 
     return MinnesotaPrior{T}(n, p, k, λ_, Φ₀, Diagonal(ω), Diagonal(ψ_), d_)
-end
+end =#
 
 """
     coef_cov(prior, Σ) -> Symmetric

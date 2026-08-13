@@ -23,24 +23,25 @@ using Random, Statistics, Printf
 # =============================================================================
 
 const SEED = 20260811
-const H    = 25          # forecast horizon
-const NSIM = 50_000      # number of simulated scenarios
+const H    = 100          # forecast horizon
+const NSIM = 100_000      # number of simulated scenarios
 const QLEV = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
 
 # --- Model A: AR(1) ----------------------------------------------------------
-ar = (c  = 15.0,      # intercept
-      φ  = 0.85,      # AR coefficient          (|φ| < 1 for stationarity)
-      σ  = 1.00,      # sd of the innovation
-      y0 = 102.0)     # starting value y_T
+ar = (c  = 2.5,      # intercept
+      φ  = 0.7,      # AR coefficient          (|φ| < 1 for stationarity)
+      σ  = 0.81,      # sd of the innovation
+      y0 = 2.5)     # starting value y_T
 
 # --- Model B: random-walk trend + AR(1) cycle --------------------------------
-uc = (ψ  = 0.70,      # cycle AR coefficient    (|ψ| < 1 for stationarity)
-      ση = 0.50,      # sd of the trend shock
-      σε = 1.00,      # sd of the cycle shock
-      μ0 = 100.0,     # starting trend level μ_T
-      c0 = 2.00)      # starting cycle value c_T
+uc = (ψ  = 0.7,      # cycle AR coefficient    (|ψ| < 1 for stationarity)
+      ση = .1,      # sd of the trend shock
+      σε = .8,      # sd of the cycle shock
+      μ0 = 2.5,     # starting trend level μ_T
+      c0 = 0.0)      # starting cycle value c_T
                       # => starting level y_T = μ0 + c0
 
+                     
 # =============================================================================
 #  SIMULATORS   (each returns an NSIM × H matrix of scenario paths)
 # =============================================================================
@@ -50,7 +51,7 @@ function simulate_ar(p, H::Int, nsim::Int)
     for s in 1:nsim
         y = p.y0
         for h in 1:H
-            y = p.c + p.φ * y + p.σ * randn()
+            y = p.c + p.φ * (y - p.c) + p.σ * randn()
             paths[s, h] = y
         end
     end
@@ -129,16 +130,20 @@ println("\n", "="^78)
 println(" PREDICTIVE QUANTILES")
 println("="^78)
 print_quantile_block(1,  paths_ar[:, 1],  paths_uc[:, 1])
-print_quantile_block(25, paths_ar[:, 25], paths_uc[:, 25])
+print_quantile_block(100, paths_ar[:, 100], paths_uc[:, 100])
 
 println("\n  Fan width (10th–90th pct) across horizons")
 println("  ", "-"^46)
 @printf("  %6s %12s %12s %10s\n", "h", "AR(1)", "trend-cyc", "ratio")
-for h in (1, 2, 5, 10, 15, 20, 25)
+#for h in (1, 2, 5, 10, 15, 20, 25)
+for h in (1, 4, 20, 40, 100)
     wa = quantile(paths_ar[:, h], 0.9) - quantile(paths_ar[:, h], 0.1)
     wu = quantile(paths_uc[:, h], 0.9) - quantile(paths_uc[:, h], 0.1)
     @printf("  %6d %12.2f %12.2f %10.2f\n", h, wa, wu, wu / wa)
 end
+
+
+
 @printf("\n  AR(1) fan converges to a finite band (long-run 80%% width ≈ %.2f);\n",
         2 * 1.2816 * ar.σ / sqrt(1 - ar.φ^2))
 println("  the trend–cycle fan keeps widening because of the random-walk trend.")

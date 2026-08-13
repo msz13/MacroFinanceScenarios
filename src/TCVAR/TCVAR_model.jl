@@ -94,7 +94,7 @@ mapping, the trend / initial-state priors and the cycle `MinnesotaPrior`
 the number of cycle VAR lags). `variable_names` defaults to `["y1", …]` and
 `trend_names` to `["τ1", …]`.
 """
-function TCVAR(trend_mapping, priors, cycle_prior::MinnesotaPrior;
+function TCVAR(trend_mapping, priors, #= cycle_prior::MinnesotaPrior; =#
                variable_names = default_variable_names(size(trend_mapping, 1)),
                trend_names = default_trend_names(size(trend_mapping, 2)))
 
