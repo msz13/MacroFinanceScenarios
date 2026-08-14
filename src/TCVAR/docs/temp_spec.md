@@ -66,3 +66,27 @@ TODO:
 - restrukturyzacja plików
 - zrobienie sampling SV
 - zrobienie TCVAR-SV
+
+
+Σ_prior, β_prior, c0_prior = var_priors(.2, 2, [2., 1., .1, 25., 1]; δ = [0,0,0,0,0] )
+
+priors = (
+    initial_trend = MvNormal([2., .5, 1., 2., 5.], diagm(ones(5))),
+    initial_cycle = c0_prior,
+    trend_covariance = InverseWishart(100, diagm([2., 1., 1., 2., 1.].^2 ./ 400)),
+    cycle_covariance = Σ_prior,
+    cycle_β = β_prior
+)
+
+refactor file structure:
+- from gibs_sampler covariance_posterior to separate file
+- from gibs sampler simulate scenarios and mean posterior to tcvar_result
+- gibs_var_steps rename to BVAR.jl
+- gibis var steps prepare_var_data seprate file
+- gibis var steps covariance_posterior_separate file
+- separate folder for var 
+- zastanowić się nad konwencją nazywania funckji: albo gibs sampler step - draw covariance, draw beta coefficients, albo posterior distrubutions: inverse wishart_posteror, minnesota_inverse wishar
+
+
+TODO:
+initial_cycle - separate function uncondutional variance in var
