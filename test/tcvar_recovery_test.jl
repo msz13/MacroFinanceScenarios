@@ -5,10 +5,11 @@ using Random
 using Statistics
 
 isdefined(Main, :TCVAR) || include(joinpath(@__DIR__, "..", "src", "TCVAR", "TCVAR.jl"))
-using .TCVAR
 using FlexiChains: @varname
 
-isdefined(Main, :tcvar_test_priors) || include(joinpath(@__DIR__, "tcvar_test_utils.jl"))
+# TCVAR members are reached as `TCVAR.f` rather than via `using .TCVAR` — see the note in
+# tcvar_test_utils.jl.
+include(joinpath(@__DIR__, "tcvar_test_utils.jl"))
 
 # Simulate one dataset from a known TCVAR, re-estimate it with `gibbs_sampler` and
 # compare the posterior mean *and* median of every parameter block against the truth.
@@ -34,7 +35,7 @@ end
 @testset "TCVAR simulation recovery" begin
     n, nt, p = 2, 2, 1
     T = 200
-    burnin = 20000
+    burnin = 2000
 
     Στ_true = diagm([0.01, 0.02])
     A_true  = [0.6 0.0; 0.1 0.5]          # companion bottom block
@@ -45,16 +46,16 @@ end
     # Estimation priors are deliberately off the truth (cycle variances 2× the true
     # ones, trend variances centred at 0.02 for both trends) so the test measures
     # learning rather than prior echo.
-    priors = tcvar_test_priors(; n = n, nt = nt, p = p, λ = 0.2, ψ = [2.0, 1.0],
+    priors = tcvar_test_priors(; n = n, nt = nt, p = p, λ = 0.5, ψ = [2.0, 1.0],
                                trend_variances = [0.02, 0.02], trend_df = 20.0)
     model = TCVAR.TCVAR(Matrix{Float64}(I, n, nt), priors)
 
     Random.seed!(42)
-    _, obs = simulate_scenarios(model, (Στ = Στ_true, β = β_true, Σc = Σc_true),
+    _, obs = TCVAR.simulate_scenarios(model, (Στ = Στ_true, β = β_true, Σc = Σc_true),
                                 initial_state, 1, T)
     data = convert(Matrix{Union{Missing,Float64}}, obs[1, :, :])
 
-    result = gibbs_sampler(model, data; burnin = burnin, n_samples = 4_000)
+    result = TCVAR.gibbs_sampler(model, data; burnin = burnin, n_samples = 2_000)
 
     β_mean,  β_median  = draw_mean(result.params[@varname(β)]),  draw_median(result.params[@varname(β)])
     Σc_mean, Σc_median = draw_mean(result.params[@varname(Σc)]), draw_median(result.params[@varname(Σc)])
@@ -65,7 +66,7 @@ end
     report_block("Σc", Σc_true, Σc_mean, Σc_median)
     report_block("Στ", Στ_true, Στ_mean, Στ_median)
 
-    #= for (label, β_est, Σc_est, Στ_est) in (("mean", β_mean, Σc_mean, Στ_mean),
+    for (label, β_est, Σc_est, Στ_est) in (("mean", β_mean, Σc_mean, Στ_mean),
                                            ("median", β_median, Σc_median, Στ_median))
         @testset "posterior $label" begin
             @test maximum(abs.(β_est - β_true)) ≤ 0.2
@@ -77,5 +78,5 @@ end
             end
             @test abs(Στ_est[1, 2]) ≤ 0.01
         end
-    end =#
+    end 
 end

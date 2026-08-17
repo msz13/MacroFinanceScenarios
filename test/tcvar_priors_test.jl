@@ -5,16 +5,19 @@ using Random
 using Statistics
 
 isdefined(Main, :TCVAR) || include(joinpath(@__DIR__, "..", "src", "TCVAR", "TCVAR.jl"))
-using .TCVAR
 using FlexiChains: @varname
 
-isdefined(Main, :tcvar_test_priors) || include(joinpath(@__DIR__, "tcvar_test_utils.jl"))
+# TCVAR members are reached as `TCVAR.f` rather than via `using .TCVAR` — see the note in
+# tcvar_test_utils.jl. The helpers are re-included unconditionally: they are plain
+# functions in `Main`, so redefining them is free, and a guard would otherwise keep a
+# stale definition alive in a long-running session.
+include(joinpath(@__DIR__, "tcvar_test_utils.jl"))
 
 @testset "TCVAR priors NamedTuple" begin
 
     @testset "var_priors returns three consistent objects" begin
         n, p, ψ = 3, 2, [2.0, 1.0, 0.5]
-        Σ_prior, β_prior, c0_prior = var_priors(0.2, p, ψ; δ = zeros(n))
+        Σ_prior, β_prior, c0_prior = TCVAR.var_priors(0.2, p, ψ; δ = zeros(n))
 
         @test Σ_prior isa InverseWishart
         @test size(Σ_prior) == (n, n)
@@ -23,7 +26,7 @@ isdefined(Main, :tcvar_test_priors) || include(joinpath(@__DIR__, "tcvar_test_ut
         @test Matrix(Ψ) ≈ diagm(ψ)
         @test mean(Σ_prior) ≈ diagm(ψ)          # d = n+2 ⇒ E[Σ] = Ψ
 
-        @test β_prior isa MinnesotaPrior
+        @test β_prior isa TCVAR.MinnesotaPrior
         @test β_prior.n == n
         @test β_prior.p == p
         @test β_prior.k == n * p
@@ -40,18 +43,18 @@ isdefined(Main, :tcvar_test_priors) || include(joinpath(@__DIR__, "tcvar_test_ut
     @testset "lag-order accessors (oldest-lag-first, intercept dropped)" begin
         n, p, λ, ψ = 2, 2, 0.5, [4.0, 1.0]
         Σ_prior = InverseWishart(float(n + 2), diagm(ψ))
-        pr = MinnesotaPrior(λ, p, Σ_prior; δ = [0.9, 0.8], intercept = true)
+        pr = TCVAR.MinnesotaPrior(λ, p, Σ_prior; δ = [0.9, 0.8], intercept = true)
 
         @test pr.k == n * p + 1
         @test TCVAR.has_intercept(pr)
 
         # own first lag δᵢ sits in the *last* (newest) block of the reversed layout
-        @test prior_var_coeff(pr) == [0.0 0.0 0.9 0.0
+        @test TCVAR.prior_var_coeff(pr) == [0.0 0.0 0.9 0.0
                                       0.0 0.0 0.0 0.8]
 
         # λ²/(s² σ̄ⱼ) with σ̄ = [4, 1], lag-2 block first, no intercept entry
-        @test diag(prior_row_covariance(pr)) ≈ [0.015625, 0.0625, 0.0625, 0.25]
-        @test size(prior_row_covariance(pr)) == (n * p, n * p)
+        @test diag(TCVAR.prior_row_covariance(pr)) ≈ [0.015625, 0.0625, 0.0625, 0.25]
+        @test size(TCVAR.prior_row_covariance(pr)) == (n * p, n * p)
     end
 
     @testset "constructor infers n and p from cycle_β" begin
@@ -103,20 +106,20 @@ isdefined(Main, :tcvar_test_priors) || include(joinpath(@__DIR__, "tcvar_test_ut
         model = TCVAR.TCVAR(Matrix{Float64}(I, n, nt), priors)
 
         Random.seed!(11)
-        _, obs = simulate_scenarios(model,
+        _, obs = TCVAR.simulate_scenarios(model,
             (Στ = diagm([0.01, 0.02]), β = [0.6 0.1; 0.0 0.5], Σc = [1.0 0.2; 0.2 0.5]),
             [1.0, 2.0, 0.0, 0.0], 1, T)
         data = convert(Matrix{Union{Missing,Float64}}, obs[1, :, :])
 
         Random.seed!(42)
-        result = gibbs_sampler(model, data; burnin = 20, n_samples = 20, thin = 2)
+        result = TCVAR.gibbs_sampler(model, data; burnin = 20, n_samples = 20, thin = 2)
 
         n_kept = length(21:2:40)                # 10 retained draws
         @test n_kept == 10
         @test size(result.trend_states) == (n_kept, T + 1, nt)
         @test size(result.cycle_states) == (n_kept, T + p, n)
 
-        pm = posterior_mean(result)
+        pm = TCVAR.posterior_mean(result)
         @test size(pm.Στ) == (nt, nt)
         @test size(pm.β) == (n * p, n)
         @test size(pm.Σc) == (n, n)
@@ -129,13 +132,13 @@ isdefined(Main, :tcvar_test_priors) || include(joinpath(@__DIR__, "tcvar_test_ut
         @test iszero(result.model.ssm.T[nt+n*(p-1)+1:end, nt+1:end])
 
         Random.seed!(42)
-        again = gibbs_sampler(model, data; burnin = 20, n_samples = 20, thin = 2)
-        @test posterior_mean(again).β == pm.β
+        again = TCVAR.gibbs_sampler(model, data; burnin = 20, n_samples = 20, thin = 2)
+        @test TCVAR.posterior_mean(again).β == pm.β
         @test again.trend_states == result.trend_states
 
         Random.seed!(43)
-        other = gibbs_sampler(model, data; burnin = 20, n_samples = 20, thin = 2)
-        @test posterior_mean(other).β != pm.β
+        other = TCVAR.gibbs_sampler(model, data; burnin = 20, n_samples = 20, thin = 2)
+        @test TCVAR.posterior_mean(other).β != pm.β
     end
 
     @testset "simulate_scenarios" begin
@@ -151,25 +154,25 @@ isdefined(Main, :tcvar_test_priors) || include(joinpath(@__DIR__, "tcvar_test_ut
         initial_state = [1.0, 2.0, 0.0, 0.0, 0.0, 0.0]
 
         Random.seed!(5)
-        states, obs = simulate_scenarios(model, truth, initial_state, 5, 10)
+        states, obs = TCVAR.simulate_scenarios(model, truth, initial_state, 5, 10)
         @test size(states) == (5, 10, n_states)
         @test size(obs) == (5, 10, n)
         @test all(states[s, 1, :] == initial_state for s in 1:5)
 
         Random.seed!(5)
-        states2, obs2 = simulate_scenarios(model, truth, initial_state, 5, 10)
+        states2, obs2 = TCVAR.simulate_scenarios(model, truth, initial_state, 5, 10)
         @test states2 == states && obs2 == obs
 
         @test iszero(model.ssm.Q)               # the skeleton was not mutated
-        @test_throws DimensionMismatch simulate_scenarios(model, truth,
+        @test_throws DimensionMismatch TCVAR.simulate_scenarios(model, truth,
                                                           initial_state[1:end-1], 5, 10)
 
         Random.seed!(7)
-        _, sim = simulate_scenarios(model, truth, initial_state, 1, T)
+        _, sim = TCVAR.simulate_scenarios(model, truth, initial_state, 1, T)
         data = convert(Matrix{Union{Missing,Float64}}, sim[1, :, :])
-        result = gibbs_sampler(model, data; burnin = 20, n_samples = 20, thin = 2)
+        result = TCVAR.gibbs_sampler(model, data; burnin = 20, n_samples = 20, thin = 2)
 
-        rstates, robs = simulate_scenarios(result, 7, 12)
+        rstates, robs = TCVAR.simulate_scenarios(result, 7, 12)
         @test size(rstates) == (7, 12, n_states)
         @test size(robs) == (7, 12, n)
         @test iszero(result.model.ssm.Q)

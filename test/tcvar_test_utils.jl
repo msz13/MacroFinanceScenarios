@@ -3,7 +3,14 @@ using LinearAlgebra
 using Statistics
 
 isdefined(Main, :TCVAR) || include(joinpath(@__DIR__, "..", "src", "TCVAR", "TCVAR.jl"))
-using .TCVAR
+
+# Module members are reached as `TCVAR.f`, deliberately, instead of `using .TCVAR`.
+# Including TCVAR.jl a second time in a live session (a REPL / IDE worker that already
+# loaded it) defines a second `TCVAR` module without retiring the first, and every name
+# imported by `using` is then exported by two modules at once — Julia refuses to resolve
+# the ambiguity and reports `var_priors` and friends as undefined in `Main`. Qualified
+# access goes through the `Main.TCVAR` binding, which always points at the newest module,
+# so the tests keep working in such a session.
 
 """
     tcvar_test_priors(; n, nt, p, λ, ψ, trend_variances, trend_df) -> NamedTuple
@@ -22,7 +29,7 @@ function tcvar_test_priors(; n::Int = 2, nt::Int = 2, p::Int = 1, λ::Real = 0.5
                            initial_trend_mean::AbstractVector = zeros(nt),
                            initial_trend_covariance::AbstractMatrix = diagm(ones(nt)))
 
-    Σ_prior, β_prior, c0_prior = var_priors(λ, p, ψ; δ = zeros(n))
+    Σ_prior, β_prior, c0_prior = TCVAR.var_priors(λ, p, ψ; δ = zeros(n))
 
     return (initial_trend    = MvNormal(collect(float.(initial_trend_mean)),
                                         Matrix(float.(initial_trend_covariance))),
