@@ -1,19 +1,30 @@
-posterior_beta_coefficient_mean(Y, X, beta_mean, Ω_inv) = inv(X'X + Ω_inv)*(X'Y + Ω_inv*beta_mean)
+# Normal–inverse-Wishart conditional posterior for a VAR, and the draw taken from it.
+# The generic pieces (the IW constructor, the conjugate coefficient mean, the
+# Kronecker factor and the draw) live in `common/posteriors.jl`; what is VAR-specific
+# and stays here is the NIW *scale* and the stationarity-rejection loop.
 
+"""
+    var_covariance_posterior(Y, X, β_posterior_μ, posterior_df, variance_prior, β_prior_μ, Ω_inv)
 
-#posterior_beta_coefficient_var(X, Σ, Ω_inv) = kron(Σ, inv(X'X + Ω_inv)) do usuniecia
+Conditional covariance posterior of a conjugate VAR:
 
-#Ω_inv prior of beta coefficient variance
+    Σ | Y, X  ~  IW(posterior_df, ε'ε + (β̂ − β₀)' Ω⁻¹ (β̂ − β₀) + variance_prior)
 
-function covariance_posterior_dist(Y, X, β_posterior_μ, posterior_df, variance_prior, β_prior_μ, Ω_inv)
+with residuals `ε = Y − X β̂`. The coefficient-shrinkage term is the NIW-specific
+part of the scale; the distribution itself is built by
+[`inverse_wishart_posterior`](@ref).
 
-    ε =  Y - X * β_posterior_μ
+`Ω_inv` is the prior precision of the coefficients.
+"""
+function var_covariance_posterior(Y, X, β_posterior_μ, posterior_df, variance_prior, β_prior_μ, Ω_inv)
+
+    ε = Y - X * β_posterior_μ
 
     β_diff = β_posterior_μ - β_prior_μ
 
-    S = ε' * ε + β_diff' * Ω_inv * β_diff  + variance_prior
+    S = ε' * ε + β_diff' * Ω_inv * β_diff + variance_prior
 
-    return InverseWishart(posterior_df, collect(Hermitian(S)))
+    return inverse_wishart_posterior(S, posterior_df)
 
 end
 
@@ -33,14 +44,14 @@ function sample_var_params(data, p, β_prior_μ, Ω_inv, S, df; max_draws::Int =
     Y, X = prepare_var_data(data, p)
     n = size(Y, 2)
 
-    β_hat = posterior_beta_coefficient_mean(Y, X, β_prior_μ, Ω_inv)
+    β_hat = normal_coefficient_posterior_mean(Y, X, β_prior_μ, Ω_inv)
 
-    Σ = rand(covariance_posterior_dist(Y, X, β_hat, df, S, β_prior_μ, Ω_inv))
+    Σ = rand(var_covariance_posterior(Y, X, β_hat, df, S, β_prior_μ, Ω_inv))
 
     # Σ and X are fixed across rejection draws, so factor the proposal covariance
-    # once and reuse it.
-    L = beta_cholesky_factor(X, Σ, Ω_inv)
-    β = draw_beta(β_hat, L)
+    # Σ ⊗ (X'X + Ω⁻¹)⁻¹ once and reuse it.
+    L = kron_cholesky_factor(Σ, inv(Symmetric(X'X + Ω_inv)))
+    β = draw_from_factor(β_hat, L)
 
     # Companion bottom block A = B' (n × n*p) in oldest-lag-first ordering.
     var_coeff(β) = collect(reshape(β, n * p, n)')
@@ -48,7 +59,7 @@ function sample_var_params(data, p, β_prior_μ, Ω_inv, S, df; max_draws::Int =
     draws = 1
     while !is_stationary(var_coeff(β), n, p) && draws < max_draws
 
-        β = draw_beta(β_hat, L)
+        β = draw_from_factor(β_hat, L)
         draws += 1
     end
 

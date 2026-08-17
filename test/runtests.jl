@@ -12,5 +12,6 @@ using .TCVAR
 end
 
 include(joinpath(@__DIR__, "tcvar_test_utils.jl"))
+include(joinpath(@__DIR__, "tcvar_posteriors_test.jl"))
 include(joinpath(@__DIR__, "tcvar_priors_test.jl"))
 include(joinpath(@__DIR__, "tcvar_recovery_test.jl"))

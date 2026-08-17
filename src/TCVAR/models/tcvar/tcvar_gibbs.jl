@@ -108,7 +108,7 @@ function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1
 
         trends_states[s,:,:], cycle_states[s,:,:] = sample_states(ssm, data, initial_state_mean, initial_state_covariance, n_trends, n_obs; p = p)
 
-        trend_covariance[s, :, :] = rand(covariance_posterior(trends_states[s,:,:], trend_covariance_scale, dτ_post))
+        trend_covariance[s, :, :] = rand(random_walk_covariance_posterior(trends_states[s,:,:], trend_covariance_scale, dτ_post))
 
         betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], p, cycle_coeff_mean, Ω_inv, cycle_covariance_scale, dc_post)
 
