@@ -70,11 +70,14 @@ receives one ready-made model instead of building the skeleton itself.
 # Fields
 - `ssm::StateSpaceModel` : state-space skeleton (draw-dependent blocks start at
   zero and are filled by [`update_tc_var!`](@ref) during sampling)
-- `priors::NamedTuple` : one Distributions.jl prior per parameter name —
-  `initial_trend::MvNormal` (initial trend state), `trend_covariance::InverseWishart`
-  (trend innovation covariance) — plus the cycle `MinnesotaPrior` under the key
-  `cycle`. The initial cycle state is mean-zero by model assumption and carries
-  no user prior.
+- `priors::NamedTuple` : one distribution per parameter name, stored verbatim —
+  - `initial_trend::MvNormal` (length `n_trends`) : initial trend state `τ₀`
+  - `initial_cycle::MvNormal` (length `n_obs*p`) : initial cycle companion state
+    `ξ₀ = [c_{-p+1}; …; c_0]`, oldest-lag-first (see [`initial_cycle_prior`](@ref))
+  - `trend_covariance::InverseWishart` (`n_trends × n_trends`) : trend innovation
+    covariance; its scale matrix is used as written, no rescaling
+  - `cycle_covariance::InverseWishart` (`n_obs × n_obs`) : cycle innovation covariance
+  - `cycle_β::MinnesotaPrior` : cycle VAR coefficients; `n` and `p` are read off it
 - `variable_names::Vector{String}` : names of the observed variables
 - `trend_names::Vector{String}` : names of the trend states
 """
@@ -86,29 +89,58 @@ struct TCVAR
 end
 
 """
-    TCVAR(trend_mapping, priors, cycle_prior::MinnesotaPrior; variable_names, trend_names)
+    TCVAR(trend_mapping, priors; variable_names, trend_names)
 
-Build a [`TCVAR`](@ref) model from an `m × n_trends` trend-to-observation
-mapping, the trend / initial-state priors and the cycle `MinnesotaPrior`
-(whose `n` must equal the number of observed variables `m` and whose `p` sets
-the number of cycle VAR lags). `variable_names` defaults to `["y1", …]` and
-`trend_names` to `["τ1", …]`.
+Build a [`TCVAR`](@ref) model from an `n_obs × n_trends` trend-to-observation mapping
+and the distribution-keyed `priors` NamedTuple (see [`TCVAR`](@ref) for the five
+required keys). The number of cycle VAR lags `p` and the number of variables `n` come
+from `priors.cycle_β`, so there is no separate cycle-prior argument; the tuple is
+stored exactly as given. `variable_names` defaults to `["y1", …]` and `trend_names` to
+`["τ1", …]`.
+
+```julia
+Σ_prior, β_prior, c0_prior = var_priors(0.2, 4, [2., 1., .1, 25., 1]; δ = zeros(5))
+
+priors = (initial_trend    = MvNormal(τ₀_mean, τ₀_cov),
+          initial_cycle    = c0_prior,
+          trend_covariance = InverseWishart(dτ, Ψτ),
+          cycle_covariance = Σ_prior,
+          cycle_β          = β_prior)
+
+model = TCVAR(trend_mapping, priors)
+```
 """
-function TCVAR(trend_mapping, priors, #= cycle_prior::MinnesotaPrior; =#
+function TCVAR(trend_mapping, priors::NamedTuple;
                variable_names = default_variable_names(size(trend_mapping, 1)),
                trend_names = default_trend_names(size(trend_mapping, 2)))
 
     n_obs, n_trends = size(trend_mapping)
 
-    n_obs == cycle_prior.n ||
-        throw(DimensionMismatch("cycle_prior.n = $(cycle_prior.n) must match the number of observed variables $n_obs"))
+    required = (:initial_trend, :initial_cycle, :trend_covariance, :cycle_covariance, :cycle_β)
+    missing_keys = filter(key -> !haskey(priors, key), required)
+    isempty(missing_keys) ||
+        throw(ArgumentError("priors is missing key(s): $(join(missing_keys, ", "))"))
+
+    β_prior = priors.cycle_β
+    p = β_prior.p
+
+    β_prior.n == n_obs || throw(DimensionMismatch(
+        "priors.cycle_β is built for n = $(β_prior.n) variables, trend_mapping has $n_obs"))
+    size(priors.cycle_covariance) == (n_obs, n_obs) || throw(DimensionMismatch(
+        "priors.cycle_covariance must be $n_obs × $n_obs"))
+    length(priors.initial_cycle) == n_obs * p || throw(DimensionMismatch(
+        "priors.initial_cycle must have length n_obs*p = $(n_obs * p)"))
+    length(priors.initial_trend) == n_trends || throw(DimensionMismatch(
+        "priors.initial_trend must have length $n_trends"))
+    size(priors.trend_covariance) == (n_trends, n_trends) || throw(DimensionMismatch(
+        "priors.trend_covariance must be $n_trends × $n_trends"))
     length(variable_names) == n_obs ||
         throw(DimensionMismatch("variable_names must have length $n_obs"))
     length(trend_names) == n_trends ||
         throw(DimensionMismatch("trend_names must have length $n_trends"))
 
-    return TCVAR(tc_var(trend_mapping; p = cycle_prior.p),
-                 merge(priors, (cycle = cycle_prior,)),
+    return TCVAR(tc_var(trend_mapping; p = p),
+                 priors,
                  collect(String, variable_names),
                  collect(String, trend_names))
 end
