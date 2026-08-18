@@ -315,17 +315,7 @@ repoint both IW callers and the beta draw at it. Verify by fixing a seed and con
 sampler output is unchanged against a pre-refactor run (the arithmetic is identical, so
 this should be bit-for-bit).
 
-**Stage 4 — scaffold the shared SV layer and the new model folders.** In `common/`:
-`sv_priors.jl` (from `SV_priors.jl`, `N` parameterised) and docstring-only scaffolds
-`sv_block.jl` and `metropolis_hastings.jl`. Create empty `models/tcvar_sv/`
-(`tcvar_sv_model.jl` / `tcvar_sv_gibbs.jl` / `tcvar_sv_result.jl`) and `models/ss_bvar/`.
-Include `common/sv_priors.jl` from `TCVAR.jl`; leave the empty scaffolds out of the include
-list until they have content.
 
-**Stage 5 — tests follow the structure.** Split `test/` to mirror `src/`:
-`test/common/`, `test/var/`, `test/models/tcvar/`. `runtests.jl` keeps its single
-`include(".../src/TCVAR/TCVAR.jl")` and includes the sub-testsets; the per-file
-`isdefined(Main, :TCVAR) || include(...)` guards keep standalone runs working.
 
 ## Verification
 

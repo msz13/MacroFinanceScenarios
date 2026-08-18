@@ -21,26 +21,29 @@ TCVAR-SV
   - use mapping function
 - create new gibs sampler - extension of TCVAR with stochastic volatility
   - 
-  create function for draw multivariate stochastic volatility block with chib approximation
-  - stochastic valatility is modeled as autoregresive model with mean and corellated innovations
-  - function should take as input resuduals and parameters - mean, matrix of ar coefficients, covariance matrix of volatility 
-  - function should call two sub functions: sample mixture indicator s and sample volatilities h
-  - volatilities should be sampled from carter kohn algorythm
-  - add script to test 
 
-  extend tcvar gibs sampler to add stochastic volatility with constand corellations:
+plan  extend tcvar gibs sampler to add stochastic volatility with constand corellations:
   - create new sampler but use already created function for same steps in two models
   - gibs sampler should have followint steps 
     - draw tcvar states 
     - draw trend covariance matrix (estimate posterios with gls)
     - draw var coeficients
-    - draw var corellations parameters L
+    - draw var corellations parameters L - with constant lower triangular covariance matrix parameters as cogley sergant
     - draw var volatilieties
     - draw volatility mean
     - draw volatility coefficients
     - draw volatility covariance matrix
-Problems:
-- correlation posterior and priors
+
+- function for draw multivariate stochastic volatility block with chib approximation
+  - stochastic valatility is modeled as autoregresive model with mean and corellated innovations
+  - function should take as input resuduals and parameters - mean, matrix of ar coefficients, covariance matrix of volatility 
+  - function should call two sub functions: sample mixture indicator s and sample volatilities h
+  - volatilities should be sampled from carter kohn algorythm with state space model
+- use same posterior distributions steps as in basic tcvar if they same or try to refactor them to make them more generic 
+- add scripts to inference stochastic volatility based  on simulated data of multivariate random walk model with example params and plot estiamted volatilities with simulated ones to compare both
+- add sript to draw each each new posterior with example params and compare posterior mean and median wih example params
+- add script to inference full TCVAr with stochastic volatility with simulated data on model with example parameters     
+- save plan as md file
 
 
 
