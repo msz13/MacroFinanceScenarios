@@ -25,3 +25,20 @@ end
 [`chol_psd`](@ref))."""
 sample_mvn(mean::AbstractVector, cov::AbstractMatrix) =
     mean + chol_psd(cov).L * randn(length(mean))
+
+"""
+    lyapunov_covariance(F, Q) -> Matrix
+
+Stationary covariance of the VAR(1) `x_t = F x_{t-1} + u_t`, `u_t ~ N(0, Q)`: the
+solution of the discrete Lyapunov equation `P = F P F' + Q`, obtained in vectorised
+form as `vec(P) = (I − F⊗F)⁻¹ vec(Q)`.
+
+`F` must be stable — every eigenvalue inside the unit circle — otherwise `I − F⊗F`
+is singular and the solve fails or returns garbage. Callers that can be handed a
+unit root (a random-walk trend block, a random-walk log-volatility) check
+[`is_stationary`](@ref) first and supply a diffuse covariance instead.
+"""
+function lyapunov_covariance(F::AbstractMatrix, Q::AbstractMatrix)
+    n = size(F, 1)
+    return reshape((I - kron(F, F)) \ vec(Q), n, n)
+end

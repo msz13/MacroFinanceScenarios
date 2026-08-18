@@ -16,8 +16,8 @@ using TimeSeries
 # signatures mention it. Layers go common → var → models → reporting.
 
 # common/ — model-agnostic state space, filtering/smoothing and posteriors
-include("common/linalg.jl")          # chol_psd, sample_mvn
-include("common/state_space.jl")     # defines StateSpaceModel, used by kalman_filter.jl and tcvar_model.jl
+include("common/linalg.jl")          # chol_psd, sample_mvn, lyapunov_covariance
+include("common/state_space.jl")     # defines the AbstractStateSpaceModel hierarchy, used by kalman_filter.jl and tcvar_model.jl
 include("common/kalman_filter.jl")
 include("common/carter_kohn.jl")
 include("common/posteriors.jl")

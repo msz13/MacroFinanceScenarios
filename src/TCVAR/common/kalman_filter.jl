@@ -2,7 +2,10 @@
 Kalman Filter implementation
 Returns filtered states, covariances, predicted states, and predicted covariances
 """
-function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missing, Float64}}, initial_state_mean::Vector{Float64}, initial_state_covariance::Matrix{Float64})
+function kalman_filter(model::AbstractStateSpaceModel,
+                       observations::AbstractMatrix{<:Union{Missing, Real}},
+                       initial_state_mean::AbstractVector{<:Real},
+                       initial_state_covariance::AbstractMatrix{<:Real})
     n_time_steps, n_obs = size(observations)
     n_states = size(model.T, 1)
 
@@ -17,10 +20,16 @@ function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missin
     state_current = initial_state_mean
     covariance_current = initial_state_covariance
 
-    # Additive process noise R*Q*R' is constant across time; compute it once.
-    RQR = model.R * model.Q * model.R'
+    # Additive process noise R*Q*R'. Constant for a StateSpaceModel (and for a
+    # TimeVaryingStateSpaceModel whose Q does not move), in which case it is computed
+    # once here and the same matrix is reused every period; `nothing` signals that it
+    # has to be rebuilt from Q_t inside the loop.
+    RQR_constant = constant_state_noise(model)
 
     for t in 1:n_time_steps
+        RQR = isnothing(RQR_constant) ? model.R * process_noise(model, t) * model.R' :
+                                        RQR_constant
+
         # Prediction step
         if t == 1
             state_predicted_t = model.T * state_current
@@ -40,7 +49,7 @@ function kalman_filter(model::StateSpaceModel, observations::Matrix{Union{Missin
             # Subset observation equation to the available series
             y = Float64.(y_t[obs_idx])
             Z_t = model.Z[obs_idx, :]
-            H_t = model.H[obs_idx, obs_idx]
+            H_t = observation_noise(model, t)[obs_idx, obs_idx]
 
             # Innovation
             innovation = y - Z_t * state_predicted_t

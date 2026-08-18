@@ -1,6 +1,6 @@
 #TODO sprawdizc cze reshape beta jest dobre
 
-function sample_states(model::StateSpaceModel, data, initial_state_mean, initial_state_covariance, n_trends, n_observations; p::Int = 1)
+function sample_states(model::AbstractStateSpaceModel, data, initial_state_mean, initial_state_covariance, n_trends, n_observations; p::Int = 1)
 
         initial_state, state_smoothed_samples = carter_kohn_sampler(model, data, initial_state_mean, initial_state_covariance)
 

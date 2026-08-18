@@ -34,7 +34,7 @@ function initial_cycle_prior(β_prior::MinnesotaPrior, Σ_prior::InverseWishart)
     Q = zeros(nc, nc)
     Q[end-n+1:end, end-n+1:end] = mean(Σ_prior)   # E[Σ], contemporaneous cycle block
 
-    P = reshape((I - kron(F, F)) \ vec(Q), nc, nc)
+    P = lyapunov_covariance(F, Q)
 
     return MvNormal(zeros(nc), Symmetric((P + P') / 2))
 end

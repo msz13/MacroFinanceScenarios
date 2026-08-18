@@ -151,8 +151,7 @@ end
 Stationary (unconditional) state covariance implied by the full transition matrix
 `model.T` and state-noise covariance `model.Q`, restricted to the cycle block.
 
-Solves the discrete Lyapunov equation `P = T·P·T' + Q` in vectorised form,
-`vec(P) = (I − T⊗T)⁻¹ vec(Q)`, restricted to the **cycle** block only.
+Delegates to [`lyapunov_covariance`](@ref), restricted to the **cycle** block only.
 
 The trend block of `model.T` is a decoupled random walk, so the full `I − T⊗T` is
 singular and the trend initialisation is kept at its prior value anyway. The cycle
@@ -165,9 +164,7 @@ solve.
 function stationary_cycle_covariance(model::StateSpaceModel, n_trends)
     Tc = model.T[n_trends+1:end, n_trends+1:end]
     Qc = model.Q[n_trends+1:end, n_trends+1:end]
-    n_cycle_states = size(Tc, 1)
-    vecP = (I - kron(Tc, Tc)) \ vec(Qc)
-    return reshape(vecP, n_cycle_states, n_cycle_states)
+    return lyapunov_covariance(Tc, Qc)
 end
 
 """

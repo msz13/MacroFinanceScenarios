@@ -3,7 +3,9 @@ Carter-Kohn Algorithm for sampling smoothed states
 This algorithm samples from the joint posterior distribution of all states
 given all observations using backward simulation
 """
-function carter_kohn_sampler(model::StateSpaceModel, observations::Matrix{Union{Missing, Float64}}, initial_state_mean, initial_state_covariance)
+function carter_kohn_sampler(model::AbstractStateSpaceModel,
+                             observations::AbstractMatrix{<:Union{Missing, Real}},
+                             initial_state_mean, initial_state_covariance)
     n_time_steps, n_obs = size(observations)
     n_states = size(model.T, 1)
 
