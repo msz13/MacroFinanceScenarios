@@ -22,6 +22,12 @@ include("common/kalman_filter.jl")
 include("common/carter_kohn.jl")
 include("common/posteriors.jl")
 
+# common/sv/ — the stochastic-volatility block, model-agnostic: it takes orthogonalised
+# residuals and the volatility parameters, and knows nothing about what produced them.
+include("common/sv/ksc_mixture.jl")   # defines KSC_MIXTURE, needed by sv_block.jl
+include("common/sv/sv_block.jl")
+include("common/sv/sv_priors.jl")
+
 # var/ — VAR algebra and the Minnesota prior
 include("var/var_data.jl")
 include("var/companion.jl")
@@ -47,6 +53,8 @@ export gibbs_sampler, MinnesotaPrior, TCVarResult
 export var_priors, initial_cycle_prior, prior_var_coeff, prior_row_covariance
 export posterior_mean, simulate_scenarios
 export carter_kohn_sampler
+# common/sv/
+export sv_priors, draw_stochastic_volatility, draw_mixture_indicators, draw_log_volatilities
 export compute_posterior_statistics
 # reporting/scenario_stats.jl
 export max_drawdown_and_length, returns_summarystats, cor_returns, annualise

@@ -61,18 +61,18 @@ the parameterisation with a conjugate conditional, and expose `L = A₀⁻¹` on
 Log volatilities — VAR(1) in the mean-adjusted level, with **correlated** innovations:
 
 ```
-h_t = h̄ + Φ (h_{t-1} - h̄) + ν_t,     ν_t ~ N(0, Ω)          t = 1 … T
-h_0 ~ N(h̄, P₀)
+h_t = μ + Φ (h_{t-1} - μ) + ν_t,     ν_t ~ N(0, Ω)          t = 1 … T
+h_0 ~ N(μ, P₀)
 ```
 
-with `h̄ ∈ ℝⁿ`, `Φ` an `n × n` AR matrix (default **diagonal**, matching `SV_priors.jl`'s
+with `μ ∈ ℝⁿ`, `Φ` an `n × n` AR matrix (default **diagonal**, matching `SV_priors.jl`'s
 scalar `ρ` per series and Clark–Ravazzolo 2015; a full matrix is supported), and `Ω` a
-full `n × n` covariance. Writing `h̃_t = h_t - h̄` gives the plain VAR(1) `h̃_t = Φ h̃_{t-1} + ν_t`
+full `n × n` covariance. Writing `h̃_t = h_t - μ` gives the plain VAR(1) `h̃_t = Φ h̃_{t-1} + ν_t`
 used by every step below. `P₀` defaults to the stationary covariance
 `vec(P₀) = (I - Φ⊗Φ)⁻¹ vec(Ω)` and falls back to a supplied diffuse matrix when `Φ` has a
 unit root (the random-walk special case used by script 1).
 
-**Parameter vector:** `Στ, β, A₀, h_{0:T}, h̄, Φ, Ω` plus the states `τ_{0:T}, c_{-p+1:T}`.
+**Parameter vector:** `Στ, β, A₀, h_{0:T}, μ, Φ, Ω` plus the states `τ_{0:T}, c_{-p+1:T}`.
 
 ---
 
@@ -89,7 +89,7 @@ new code.
 | 3 | Cycle VAR coefficients | `β` | new GLS posterior + existing `is_stationary`, `prepare_var_data`, Minnesota prior |
 | 4 | Simultaneity matrix | `A₀` | new: `n-1` weighted univariate regressions on the generic `normal_posterior` |
 | 5 | Volatilities | `h_{0:T}` (and mixture indicators `s`) | new SV block, built on `carter_kohn_sampler` |
-| 6 | Volatility mean | `h̄` | new 5-line assembly on the generic `normal_posterior` |
+| 6 | Volatility mean | `μ` | new 5-line assembly on the generic `normal_posterior` |
 | 7 | Volatility AR | `Φ` | new assembly (diagonal) / existing `normal_coefficient_posterior_mean` + `kron_cholesky_factor` (full) |
 | 8 | Volatility covariance | `Ω` | `inverse_wishart_posterior` **verbatim** |
 
@@ -105,7 +105,7 @@ Q_t = blockdiag(Στ, 0_{n(p-1)}, Σ_t),      Σ_t = A₀⁻¹ H_t A₀⁻ᵀ
 the current `h`. This is the one structural change to `common/`: see §3.1.
 
 Initial-state covariance of the cycle block is re-initialised each sweep from the
-Lyapunov solve at the **unconditional** volatility `Σ̄ = A₀⁻¹ diag(exp(h̄)) A₀⁻ᵀ`
+Lyapunov solve at the **unconditional** volatility `Σ̄ = A₀⁻¹ diag(exp(μ)) A₀⁻ᵀ`
 (the SV analogue of what `stationary_cycle_covariance` does today with the constant `Σc`).
 
 ### Step 2 — trend covariance `Στ`
@@ -208,35 +208,35 @@ P(s_{it} = j | ·) ∝ (q_j / v_j) exp( -(y*_{it} - h_{it} - m_j)² / (2 v_j²) 
 ```
 
 **5b — log volatilities `h`** — conditional on `s` the system is linear Gaussian. Demean
-by `h̄` and remove the mixture means so it fits `StateSpaceModel` exactly:
+by `μ` and remove the mixture means so it fits `StateSpaceModel` exactly:
 
 ```
-measurement:   ỹ_t = h̃_t + z_t,        ỹ_t = y*_t - m_{s_t} - h̄,    z_t ~ N(0, diag(v²_{s_t}))
+measurement:   ỹ_t = h̃_t + z_t,        ỹ_t = y*_t - m_{s_t} - μ,    z_t ~ N(0, diag(v²_{s_t}))
 state:         h̃_t = Φ h̃_{t-1} + ν_t,  ν_t ~ N(0, Ω)
 ```
 
 i.e. `T = Φ, R = I, Z = I, Q = Ω, H_t = diag(v²_{s_t})` — a **time-varying observation
 covariance**, the second structural requirement on `common/` (§3.1). Hand it to the
 existing `carter_kohn_sampler`; its `initial_state` return is `h̃_0`, which steps 6–8 need.
-Add back `h̄` to get `h_{0:T}`.
+Add back `μ` to get `h_{0:T}`.
 
 The alignment with the rest of the sweep: `prepare_var_data` on the `T+p`-point cycle path
 yields exactly `T` residual rows, so `h_{1:T}` lines up one-for-one with the periods whose
 `Σ_t` step 1 consumes.
 
-### Step 6 — volatility mean `h̄`
+### Step 6 — volatility mean `μ`
 
-`h̃_t = h_t - h̄` gives `h_t - Φ h_{t-1} = (I - Φ) h̄ + ν_t`, a regression on the constant
-design `M = I - Φ` with known `Ω`. With prior `h̄ ~ N(μ₀, V₀)`:
+`h̃_t = h_t - μ` gives `h_t - Φ h_{t-1} = (I - Φ) μ + ν_t`, a regression on the constant
+design `M = I - Φ` with known `Ω`. With prior `μ ~ N(μ₀, V₀)`:
 
 ```
 P_d = T · Mᵀ Ω⁻¹ M
 b_d = Mᵀ Ω⁻¹ Σ_t (h_t - Φ h_{t-1})
-h̄ | · ~ N( (V₀⁻¹ + P_d)⁻¹ (V₀⁻¹ μ₀ + b_d), (V₀⁻¹ + P_d)⁻¹ )
+μ | · ~ N( (V₀⁻¹ + P_d)⁻¹ (V₀⁻¹ μ₀ + b_d), (V₀⁻¹ + P_d)⁻¹ )
 ```
 
-(The `h_0` draw is used through `h_1 - Φ h_0`; the `h_0 ~ N(h̄, P₀)` term is dropped from
-the conditional, the usual conditional-likelihood treatment.) `h̄` is **not identified when
+(The `h_0` draw is used through `h_1 - Φ h_0`; the `h_0 ~ N(μ, P₀)` term is dropped from
+the conditional, the usual conditional-likelihood treatment.) `μ` is **not identified when
 `Φ = I`** — the sampler skips this block in that case and anchors the level at `h_0`.
 
 ### Step 7 — volatility AR coefficients `Φ`
@@ -275,15 +275,15 @@ for s in 2:n_draws
     Σ_series  = simultaneity_covariances(A₀, h[:, 1:T])          # Σ_t = A₀⁻¹ H_t A₀⁻ᵀ
     update_tc_var_sv!(ssm, var_coeff, Στ, Σ_series, …)
 
-    τ, c   = sample_states(ssm, data, μ₀, P₀_state, n_trends, n_obs; p)   # 1
+    τ, c   = sample_states(ssm, data, μ₀_state, P₀_state, n_trends, n_obs; p)   # 1
     Στ     = rand(random_walk_covariance_posterior(τ, Ψτ, dτ_post))       # 2
     β      = draw_var_coefficients_gls(c, p, Σ_series, β₀, P₀_β)          # 3
     ε      = cycle_residuals(c, β, p)
     A₀     = draw_simultaneity(ε, h[:, 1:T], A₀_prior)                    # 4
-    h, ω   = draw_stochastic_volatility(A₀ * ε', h, (h̄, Φ, Ω))            # 5
-    h̄      = draw_volatility_mean(h, Φ, Ω, h̄_prior)                       # 6
-    Φ      = draw_volatility_ar(h, h̄, Ω, Φ_prior)                         # 7
-    Ω      = rand(volatility_covariance_posterior(h, h̄, Φ, Ψ_Ω, dΩ_post)) # 8
+    h, ω   = draw_stochastic_volatility(A₀ * ε', h, (μ, Φ, Ω))            # 5
+    μ      = draw_volatility_mean(h, Φ, Ω, μ_prior)                       # 6
+    Φ      = draw_volatility_ar(h, μ, Ω, Φ_prior)                         # 7
+    Ω      = rand(volatility_covariance_posterior(h, μ, Φ, Ψ_Ω, dΩ_post)) # 8
 end
 ```
 
@@ -379,7 +379,7 @@ Multivariate SV draw with the KSC mixture approximation.
 
   residuals : T × n orthogonalised residuals (e_t = A₀ ε_t)
   h         : (T+1) × n current log-volatility path, rows t = 0 … T
-  params    : NamedTuple (h̄, Φ, Ω)
+  params    : NamedTuple (μ, Φ, Ω)
 
 Returns (h_new, s) — the drawn path (T+1 rows, including h_0) and the T × n mixture
 indicators. Calls draw_mixture_indicators then draw_log_volatilities.
@@ -389,8 +389,8 @@ draw_mixture_indicators(y_star, h)               -> Matrix{Int}      # T × n
 draw_log_volatilities(y_star, s, params; …)      -> Matrix{Float64}  # (T+1) × n, via carter_kohn_sampler
 
 draw_volatility_mean(h, Φ, Ω, prior)             -> Vector
-draw_volatility_ar(h, h̄, Ω, prior; structure = :diagonal, max_draws = 100) -> Matrix
-volatility_covariance_posterior(h, h̄, Φ, scale_prior, df_posterior) -> InverseWishart
+draw_volatility_ar(h, μ, Ω, prior; structure = :diagonal, max_draws = 100) -> Matrix
+volatility_covariance_posterior(h, μ, Φ, scale_prior, df_posterior) -> InverseWishart
 ```
 
 `sv_priors(n; …)` replaces the current `SV_priors.jl` (which hard-codes `const N = 6` and
@@ -404,7 +404,7 @@ distribution-keyed style as `tcvar_priors.jl`:
  simultaneity          = MvNormal(zeros(n*(n-1)÷2), 10.0 I))
 ```
 
-The current `h̄` prior is written as a closure `(ρ, σ²) -> Normal(...)` over the ergodic
+The current `μ` prior is written as a closure `(ρ, σ²) -> Normal(...)` over the ergodic
 variance. That makes it a *conditional* prior that changes with the draws, which breaks
 the conjugate update in step 6. Replacing it with a fixed, generously wide `MvNormal`
 centred at the same `log(0.1²)` is the change (**D3**).
@@ -456,7 +456,7 @@ parameters plus state arrays:
 ```julia
 struct TCVarSVResult
     model::TCVARSV
-    params::FlexiChain{VarName}          # Στ, β, A₀, h̄, Φ, Ω  (matrix-valued)
+    params::FlexiChain{VarName}          # Στ, β, A₀, μ, Φ, Ω  (matrix-valued)
     trend_states  ::Array{Float64,3}     # n_kept × (T+1) × n_trends
     cycle_states  ::Array{Float64,3}     # n_kept × (T+p) × n_obs
     volatilities  ::Array{Float64,3}     # n_kept × (T+1) × n_obs   (h, log scale)
@@ -468,7 +468,7 @@ cycle paths do: it is a `T`-length path, not a fixed-size parameter block, and
 `compute_posterior_statistics` / `plot_states` already work on that shape.
 
 Initialisation of the sweep: `h[1,:,:]` at `log` of the OLS residual variances of a
-homoskedastic pilot VAR on the initial cycle path, `A₀ = I`, `h̄` at its prior mean,
+homoskedastic pilot VAR on the initial cycle path, `A₀ = I`, `μ` at its prior mean,
 `Φ = 0.95 I`, `Ω`, `Στ` at their prior means, `β` at the same identity-on-last-lag start
 TCVAR uses.
 
@@ -492,8 +492,8 @@ multivariate random walk model".
 1. Simulate `n = 3, T = 500`: `h_t = h_{t-1} + ν_t`, `ν ~ N(0, Ω_true)` with a
    deliberately **correlated** `Ω_true` (e.g. `0.02·[1 .5 .2; .5 1 .3; .2 .3 1]`),
    `h_0 = log([0.5, 1.0, 2.0].^2)`; then `e_t ~ N(0, H_t)`.
-2. Run steps 5 + 8 only (`h` and `Ω`), holding `h̄ = 0`, `Φ = I` fixed — under a unit root
-   `h̄` is unidentified, so it is not estimated here (§Step 6).
+2. Run steps 5 + 8 only (`h` and `Ω`), holding `μ = 0`, `Φ = I` fixed — under a unit root
+   `μ` is unidentified, so it is not estimated here (§Step 6).
 3. Plot per series: true `exp(h_t/2)` vs posterior mean and 90% band; plus the realised
    `|e_t|` as a scatter for context. One figure, `n` stacked panels.
 4. Assert-style printout: RMSE of `exp(ĥ/2)` against truth, share of periods where the
@@ -513,9 +513,9 @@ times **conditioning on the true values of every other block**, and report
 |---|---|---|
 | `β` (GLS) | known `B, A₀, h` | `draw_var_coefficients_gls` |
 | `A₀` | known `ε, h` | `draw_simultaneity` |
-| `h̄` | known `h, Φ, Ω` | `draw_volatility_mean` |
-| `Φ` | known `h, h̄, Ω` | `draw_volatility_ar` (both `:diagonal` and `:full`) |
-| `Ω` | known `h, h̄, Φ` | `volatility_covariance_posterior` |
+| `μ` | known `h, Φ, Ω` | `draw_volatility_mean` |
+| `Φ` | known `h, μ, Ω` | `draw_volatility_ar` (both `:diagonal` and `:full`) |
+| `Ω` | known `h, μ, Φ` | `volatility_covariance_posterior` |
 
 Conditioning on the truth turns each into a single-block sampling problem whose posterior
 concentrates around the truth as `T` grows, so a bias in any one assembly shows up here
@@ -528,7 +528,7 @@ Matches "inference full TCVAR with stochastic volatility with simulated data on 
 example parameters".
 
 1. Simulate a `n = 3, n_trends = 3, p = 1, T = 400` TCVAR-SV forward from known
-   `Στ, B, A₀, h̄, Φ, Ω` (a `simulate_tcvar_sv` helper on the model, the SV analogue of
+   `Στ, B, A₀, μ, Φ, Ω` (a `simulate_tcvar_sv` helper on the model, the SV analogue of
    `simulate_scenarios`).
 2. Estimate with `gibbs_sampler(::TCVARSV, data; burnin = 5000, n_samples = 5000)`.
 3. Output: `plot_states` (trends + cycles vs simulated truth), `plot_volatilities`
@@ -557,7 +557,7 @@ test/common/sv/sv_block_test.jl     h fixed at truth ⇒ indicator frequencies m
                                     analytic weights; small-T posterior mean of h tracks
                                     the truth (seeded, loose tolerance)
 test/common/sv/sv_parameters_test.jl  each of steps 6/7/8 against its closed form on
-                                    synthetic h with known (h̄, Φ, Ω)
+                                    synthetic h with known (μ, Φ, Ω)
 test/var/simultaneity_test.jl       homoskedastic limit equals the OLS Cholesky factor;
                                     round-trip Σ_t = A₀⁻¹H_tA₀⁻ᵀ ⇒ A₀ recovered
 test/models/tcvar_sv/tcvar_sv_recovery_test.jl
@@ -616,7 +616,7 @@ a regression in the existing model can only come from one commit.
   `Φ|Σ ~ MN(Φ₀, Ω_M, Σ)` prior is fixed at `Σ̄ = mean(priors.cycle_covariance)`
   (Cogley–Sargent's choice). The alternative — rescaling by the current `Σ̄_t` average
   each sweep — makes the prior data-dependent; not taken.
-- **D3 — `h̄` prior.** The closure form in today's `SV_priors.jl` conditions on `(ρ, σ²)`
+- **D3 — `μ` prior.** The closure form in today's `SV_priors.jl` conditions on `(ρ, σ²)`
   and would break step 6's conjugacy; replaced by a fixed wide `MvNormal` at the same
   centre.
 - **D4 — `Φ` default is diagonal**, matching `SV_priors.jl`'s scalar `ρ` and
