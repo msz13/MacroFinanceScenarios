@@ -114,7 +114,7 @@ needed by the other blocks, but they are what makes the draw reproducible and ar
 inspecting when a volatility path misbehaves).
 """
 function draw_stochastic_volatility(residuals::AbstractMatrix{<:Real}, h::AbstractMatrix{<:Real},
-                                    params; h0_covariance = nothing, offset::Real = 1e-3)
+                                    params; h0_covariance = nothing, offset::Real = 1e-4)
     n_time, n = size(residuals)
     size(h) == (n_time + 1, n) || throw(DimensionMismatch(
         "residuals are $(size(residuals)) (T × n), so h must be $((n_time + 1, n)) " *
