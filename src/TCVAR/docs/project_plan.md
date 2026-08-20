@@ -68,7 +68,9 @@ o	Inne założenia aktywów, fat tails, itd
   - time varing coefficient params
 - różne measurement equtations - definicje trendów poszczególnych variables,
   - earnigns growth tylko gdp/consumtion growth trend vs addtional earnigns growth trend
-  - dy/pe jako expectatons, równe definicje expectations
+  - dy/pe jako expectatons, równe definicje expectations:
+    - trends + cycle
+    - loadings * trends +cycle 
 - #### wyzwania
   - explosive trends - mogą się odchylić do nierealnych wartości rozwiązania:
     - trend ar proces,
