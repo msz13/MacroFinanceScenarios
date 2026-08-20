@@ -16,7 +16,7 @@
 # extra Gibbs block, drawn here.
 
 """
-    LOG_CHISQ1_MEAN
+    LOG_CHISQ1_MEAN==
 
 `E[log χ²₁] = ψ(1/2) + log 2 ≈ -1.2704`, the mean the mixture has to reproduce. The
 component means of [`KSC_MIXTURE`](@ref) are the published table values shifted by this
@@ -66,23 +66,6 @@ const KSC_MIXTURE = let
 end
 
 """
-    draw_categorical(weights) -> Int
-
-Index drawn with probability proportional to `weights` (which need not sum to one).
-Inverse-CDF on a `rand()`; the mixture has seven components, so the linear scan costs
-less than building a `Categorical`.
-"""
-function draw_categorical(weights::AbstractVector{Float64})
-    threshold = rand() * sum(weights)
-    cumulative = 0.0
-    @inbounds for j in eachindex(weights)
-        cumulative += weights[j]
-        threshold <= cumulative && return j
-    end
-    return lastindex(weights)
-end
-
-"""
     draw_mixture_indicators(y_star, h) -> Matrix{Int}
 
 Draw the KSC mixture component label of every observation, independently across series
@@ -96,7 +79,8 @@ Returns the `T × n` matrix of labels, each in `1:7`.
 
 Weights are formed in logs and shifted by their maximum before exponentiating, so an
 observation that lands far out in the tail of every component still yields a proper
-distribution rather than seven underflowed zeros.
+distribution rather than seven underflowed zeros; the shift cancels in the
+normalisation, and the label is then a `rand(Categorical(·))` draw.
 """
 function draw_mixture_indicators(y_star::AbstractMatrix{<:Real}, h::AbstractMatrix{<:Real})
     size(y_star) == size(h) || throw(DimensionMismatch(
@@ -119,11 +103,17 @@ function draw_mixture_indicators(y_star::AbstractMatrix{<:Real}, h::AbstractMatr
             weights[j] = log_scales[j] - centred^2 / (2 * variances[j])
             largest = max(largest, weights[j])
         end
+        total = 0.0
         for j in 1:n_components
             weights[j] = exp(weights[j] - largest)
+            total += weights[j]
         end
+        weights ./= total
 
-        indicators[t, i] = draw_categorical(weights)
+        # `Categorical` wraps `weights` without copying, so the buffer is reused across
+        # observations; it is normalised in place above because the constructor requires
+        # a probability vector.
+        indicators[t, i] = rand(Categorical(weights))
     end
 
     return indicators
