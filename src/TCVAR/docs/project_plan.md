@@ -19,14 +19,21 @@ problem - z czego wynikaja obecne wyceny
   - zmienila sie dlugookresowa stopa dyskontowa
 - nie zmienila sie fair value - bedziemy mieli mean reversion 
 
+#### Analises contribution
+- wpisuje się w nurt, gdy dy nie jest stacjonarne, podlega trendom, szukania fair vale cape, ale wcześniejsze próby badały tylko pd i dividends growth (valuation ratios and cashflow trens, score dirven model, decomposycje trendu dy jednoczynnikowe), albo vars bez trendow (vanguard davis, ale rozszerzenie new trends)
+- wpisuje się nurt sum of the parts, decomposition
+- wpisuje się w debatę what drives
+- nowocia jest nie model obiektywny oczekiwn a subiektywny
 
 
 
 Powónwujemy rone specyfikacje trendow z modelem bez trendow - villani.
 
 -	Long term extension of sum of the parts model
--	#### Modele do porównania:
+-	#### Modele do porównania w forecasts:
+  - MVormal - basowy
   -	Steady state bvar with SV
+  -	Steady state bvar - tradycyjny - returns i pd i zmienne macro
   -	TC VAR-SV – jeden trend dla zmiennej – wtedy jest podobne do steady state bvar z time varing state
   -	Zwykłdy TVP-VAR – czy identygikacja trendów coś daje
   -	TC-VAR with SV
@@ -46,5 +53,23 @@ o	Forecast error and density – to samo co marginal predictive likehod
 o	Porfolio utlility 
 o	Different correlation on different regimes (macro regimes, stgflations, rozwój, itd) – impulse response functions
 o	Inne założenia aktywów, fat tails, itd
+
+#### Pomysły na wariacje modelu"
+- dane
+  - tylko asset returns
+  - variables levels zamiast changes
+  - pd changes zamiast level
+  - dodatkowo konsumpcja
+  - dodatkowo expected volatility/equity risk premium
+  - survey data
+- rodzaje modeli
+  - tc var
+  - trend + ar cycle  + corelated innovations 
+- różne measurement equtations - definicje trendów poszczególnych variables,
+  - earnigns growth tylko gdp/consumtion growth trend vs addtional earnigns growth trend
+  - dy/pe jako expectatons, równe definicje expectations
 - #### wyzwania
-  - explosive trends - mogą się odchylić do nierealnych wartości rozwiązania: trend ar proces, tighter priors on trend innovation, trend truncated normal bounded do jakiś wartości, np. trend inflacji dla USA  (0%, 4%)  
+  - explosive trends - mogą się odchylić do nierealnych wartości rozwiązania:
+    - trend ar proces,
+    - tighter priors on trend innovation,
+    - trend truncated normal bounded do jakiś wartości, np. trend inflacji dla USA  (0%-4%/-1%-5%)  
