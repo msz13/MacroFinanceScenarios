@@ -1,0 +1,50 @@
+### Problem:
+warianty:
+- porównanie forecasting performance modeli
+- zrozumienie wpływu trendów na wycenę i wzrost earnings
+
+Planowane analizy:
+- USA tcvar porównanie modeli
+- international tcvar dla g7 lub części
+- model z polską
+
+Long term asset returns scenarios - long term macro trends
+We deal with long term return forecast, in tradition of barberis, cambpel i nni. 
+we connect to tradition of building block of asset retuns.
+We introduce trends as in norges and acwi
+
+problem - z czego wynikaja obecne wyceny
+- zmienila sie fair value - wiec nie bedzie mean reversion lub niewielkie, zmienila sie bo:
+  - zmienily sie dlugookresowe oczekiwania  co do wzrostu, mogl sie zmienic prognoza wzrostu pkb, albo udzial zysko w pkb
+  - zmienila sie dlugookresowa stopa dyskontowa
+- nie zmienila sie fair value - bedziemy mieli mean reversion 
+
+
+
+
+Powónwujemy rone specyfikacje trendow z modelem bez trendow - villani.
+
+-	Long term extension of sum of the parts model
+-	#### Modele do porównania:
+  -	Steady state bvar with SV
+  -	TC VAR-SV – jeden trend dla zmiennej – wtedy jest podobne do steady state bvar z time varing state
+  -	Zwykłdy TVP-VAR – czy identygikacja trendów coś daje
+  -	TC-VAR with SV
+  -	Ewentualnie oba bez SV 
+  -    bvar dla dy or cape, z average div yeld and earnings growth
+
+-	#### In sample comparison
+o	Porównanie moments of simulated and real data dla całej próbki
+o	Predictive likehood /Marginal predictive likehood - https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2507827
+Marginalized Predictive Likelihood Comparisons of Linear Gaussian State-Space Models with Applications to DSGE, DSGE-VAR, and VAR Models
+o	Porównanie simulated moments dla kilku wybranych punktów, np. przed i po kryzysie, gdy parametry są oszacowane dla całej próbki
+o	Porfolio utility dla parametrów oszacowanych dla całej próbki
+-	#### out of smaple
+o	Moments of simulated data in periods
+o	Percentailse of simulated data in periods
+o	Forecast error and density – to samo co marginal predictive likehod
+o	Porfolio utlility 
+o	Different correlation on different regimes (macro regimes, stgflations, rozwój, itd) – impulse response functions
+o	Inne założenia aktywów, fat tails, itd
+- #### wyzwania
+  - explosive trends - mogą się odchylić do nierealnych wartości rozwiązania: trend ar proces, tighter priors on trend innovation, trend truncated normal bounded do jakiś wartości, np. trend inflacji dla USA  (0%, 4%)  
