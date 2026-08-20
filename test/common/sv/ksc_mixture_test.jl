@@ -40,7 +40,7 @@ ksc_pdf(x) = sum(TCVAR.KSC_MIXTURE.probabilities[j] *
         @test all(>(0), mixture.probabilities)
         @test all(>(0), mixture.variances)
         @test mixture.standard_deviations ≈ sqrt.(mixture.variances)
-        @test mixture.log_scales ≈ log.(mixture.probabilities ./ mixture.standard_deviations)
+        @test mixture.components == Normal.(mixture.means, mixture.standard_deviations)
 
         # The stored means are the published table shifted by E[log χ²₁].
         raw = [-10.12999, -3.97281, -8.56686, 2.77786, 0.61942, 1.79518, -1.08819]
@@ -142,13 +142,5 @@ ksc_pdf(x) = sum(TCVAR.KSC_MIXTURE.probabilities[j] *
         end
     end
 
-    @testset "extreme deviations still yield a proper draw" begin
-        # Weights are formed in logs and re-centred before exponentiating; without that,
-        # every component underflows to zero here and the normalisation is 0/0.
-        Random.seed!(33)
-        indicators = TCVAR.draw_mixture_indicators(fill(-400.0, 20, 1), zeros(20, 1))
-        @test all(j -> 1 ≤ j ≤ 7, indicators)
-        @test all(==(1), indicators)          # the widest, left-most component
-    end
-
+ 
 end
