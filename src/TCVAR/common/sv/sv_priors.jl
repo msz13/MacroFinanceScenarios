@@ -5,7 +5,8 @@
 
 """
     sv_priors(n; volatility_level = 0.1, mean_sd = 2.0, ar_mean = 0.8, ar_sd = 0.2,
-                 covariance_sd = 0.2, covariance_df = n + 11, simultaneity_variance = 10.0)
+                 covariance_sd = 0.2, covariance_df = n + 11, simultaneity_variance = 10.0,
+                 ar_structure = :diagonal)
         -> NamedTuple
 
 Priors for an `n`-series stochastic-volatility block:
@@ -14,8 +15,11 @@ Priors for an `n`-series stochastic-volatility block:
   level of each log variance. Centred so that the prior median innovation standard
   deviation is `volatility_level`.
 * `volatility_ar` — `diag(Φ) ~ N(ar_mean·1, ar_sd²·I)`, the AR(1) persistence of each
-  log variance (Clark & Ravazzolo 2015). The default `Φ` is diagonal; the full-matrix
-  option draws `vec(Φ')` against the same mean and covariance.
+  log variance (Clark & Ravazzolo 2015). The default `Φ` is diagonal; under
+  `ar_structure = :full` the same prior is lifted to the `n²` elements of `vec(Φᵀ)` —
+  mean `vec(ar_mean·I)`, covariance `ar_sd²·I` — so a full `Φ` is centred on the same
+  diagonal AR(1) and every off-diagonal spillover is shrunk towards zero with the same
+  tightness.
 * `volatility_covariance` — `Ω ~ IW(covariance_df, Ψ)` with `Ψ` set so that
   `mean(Ω) = covariance_sd²·I`.
 * `simultaneity` — `N(0, simultaneity_variance·I)` on the `n(n−1)/2` free elements of the
@@ -42,7 +46,8 @@ function sv_priors(n::Integer;
                    ar_sd::Real = 0.2,
                    covariance_sd::Real = 0.2,
                    covariance_df::Real = n + 11,
-                   simultaneity_variance::Real = 10.0)
+                   simultaneity_variance::Real = 10.0,
+                   ar_structure::Symbol = :diagonal)
 
     n ≥ 1 || throw(ArgumentError("n must be ≥ 1, got $n"))
     volatility_level > 0 || throw(ArgumentError("volatility_level must be > 0, got $volatility_level"))
@@ -54,6 +59,8 @@ function sv_priors(n::Integer;
         "got $covariance_df"))
     simultaneity_variance > 0 || throw(ArgumentError(
         "simultaneity_variance must be > 0, got $simultaneity_variance"))
+    ar_structure in (:diagonal, :full) || throw(ArgumentError(
+        "ar_structure must be :diagonal or :full, got :$ar_structure"))
 
     df = float(covariance_df)
     # IW(df, Ψ) has mean Ψ/(df − n − 1), so the scale carries the (df − n − 1) factor.
@@ -61,10 +68,16 @@ function sv_priors(n::Integer;
 
     n_simultaneity = n * (n - 1) ÷ 2
 
+    # :diagonal puts the prior on diag(Φ); :full puts it on vec(Φᵀ), centred on the same
+    # diagonal matrix so the two structures agree wherever they overlap.
+    ar_mean_vector = ar_structure === :diagonal ? fill(float(ar_mean), n) :
+                                                  vec(Matrix(float(ar_mean) * I, n, n))
+    n_ar = length(ar_mean_vector)
+
     return (volatility_mean       = MvNormal(fill(log(float(volatility_level)^2), n),
                                              Matrix(float(mean_sd)^2 * I, n, n)),
-            volatility_ar         = MvNormal(fill(float(ar_mean), n),
-                                             Matrix(float(ar_sd)^2 * I, n, n)),
+            volatility_ar         = MvNormal(ar_mean_vector,
+                                             Matrix(float(ar_sd)^2 * I, n_ar, n_ar)),
             volatility_covariance = InverseWishart(df, scale),
             simultaneity          = MvNormal(zeros(n_simultaneity),
                                              Matrix(float(simultaneity_variance) * I,

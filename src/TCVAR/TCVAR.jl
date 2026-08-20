@@ -41,6 +41,11 @@ include("models/tcvar/tcvar_states.jl")
 include("models/tcvar/tcvar_result.jl")  # defines TCVarResult, needed by plots.jl
 include("models/tcvar/tcvar_gibbs.jl")
 
+# models/tcvar_sv/ — the trend-cycle VAR with multivariate stochastic volatility
+include("models/tcvar_sv/tcvar_sv_priors.jl")  # defines TCVARSVPriors, a field type of TCVARSV
+include("models/tcvar_sv/tcvar_sv_model.jl")   # defines TCVARSV, needed by tcvar_sv_result.jl
+include("models/tcvar_sv/tcvar_sv_result.jl")
+
 # reporting/ — summaries, plots and scenario statistics
 include("reporting/posterior_summaries.jl")
 include("reporting/plots.jl")
@@ -55,6 +60,9 @@ export posterior_mean, simulate_scenarios
 export carter_kohn_sampler
 # common/sv/
 export sv_priors, draw_stochastic_volatility, draw_mixture_indicators, draw_log_volatilities
+# models/tcvar_sv/
+export TCVARSV, TCVARSVPriors, tcvar_sv_priors, tc_var_sv, TCVarSVResult
+export simulate_tcvar_sv, posterior_volatilities
 export compute_posterior_statistics
 # reporting/scenario_stats.jl
 export max_drawdown_and_length, returns_summarystats, cor_returns, annualise

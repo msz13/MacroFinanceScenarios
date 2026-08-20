@@ -39,6 +39,35 @@ isdefined(TCVAR, :lyapunov_covariance) || error(
         @test TCVAR.lyapunov_covariance(fill(0.9, 1, 1), fill(0.19, 1, 1))[1] ≈ 0.19 / (1 - 0.81)
     end
 
+    @testset "psd_factor" begin
+        A = [2.0 0.6 -0.1; 0.6 1.5 0.3; -0.1 0.3 0.9]
+        L = TCVAR.psd_factor(A)
+        @test L * L' ≈ A
+        @test istril(L)                               # positive definite → Cholesky
+
+        # A zero covariance factors to exactly zero, so a switched-off noise block draws
+        # nothing at all. This is the difference from chol_psd, whose jitter would leak
+        # draws with a standard deviation of ≈ 1e-4 here.
+        @test TCVAR.psd_factor(zeros(3, 3)) == zeros(3, 3)
+        @test all(iszero, TCVAR.psd_factor(zeros(3, 3)) * randn(3))
+        @test !all(iszero, TCVAR.chol_psd(zeros(3, 3)).L * ones(3))
+
+        # A singular but non-zero PSD matrix keeps its null space: the factorisation
+        # reproduces it, and a draw stays in the one-dimensional span of v (up to the
+        # eigensolver's rounding of the two zero eigenvalues).
+        v = [1.0, -2.0, 0.5]
+        singular = v * v'
+        L_singular = TCVAR.psd_factor(singular)
+        @test L_singular * L_singular' ≈ singular
+
+        Random.seed!(1)
+        draw = L_singular * randn(3)
+        @test norm(draw - v * (dot(v, draw) / dot(v, v))) < 1e-6
+
+        # A tiny negative eigenvalue from rounding is clamped, not propagated as a NaN.
+        @test all(isfinite, TCVAR.psd_factor(singular - 1e-14 * I))
+    end
+
     @testset "lyapunov_covariance behind its callers" begin
         # `initial_cycle_prior` and `stationary_cycle_covariance` are the two existing
         # call sites; both must still return a covariance that solves their own Lyapunov

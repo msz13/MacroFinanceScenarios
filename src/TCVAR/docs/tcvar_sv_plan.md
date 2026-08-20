@@ -436,19 +436,148 @@ using it.
 
 ## 4. `models/tcvar_sv/`
 
+### 4.1 Files
+
 ```
-tcvar_sv_model.jl    TCVARSV struct (ssm skeleton with 3-D Q, priors, names, ar_structure);
+tcvar_sv_model.jl    TCVARSV struct (ssm skeleton with 3-D Q, priors::TCVARSVPriors,
+                     names, ar_structure);
                      tc_var_sv(trend_mapping, T; p) skeleton builder;
                      update_tc_var_sv!(ssm, var_coeff, Στ, Σ_series, …)  — in place, no
                      reallocation of the T × n_states × n_states array between draws
-tcvar_sv_priors.jl   tcvar_sv_priors(...) — the five TCVAR keys plus the four SV keys;
-                     constructor validation mirroring TCVAR's
+tcvar_sv_priors.jl   const TCVARSVPriors = @NamedTuple{...} — the five TCVAR keys plus the
+                     four SV keys — and tcvar_sv_priors(...), which assembles and validates
+                     it; see §4.2
 tcvar_sv_gibbs.jl    gibbs_sampler(model::TCVARSV, data; burnin, n_samples, thin, logging)
 tcvar_sv_result.jl   TCVarSVResult, build_result, posterior_mean, simulate_scenarios
 ```
 
 `sample_states` is **not** duplicated: generalising its signature to
 `AbstractStateSpaceModel` (§3.1) is enough for TCVAR-SV to call the existing one.
+
+### 4.2 Priors — the `TCVARSVPriors` NamedTuple type
+
+`models/tcvar_sv/tcvar_sv_priors.jl` fixes the prior tuple as a **named type**, not just a
+convention. TCVAR gets away with `priors::NamedTuple` and a `haskey` loop because it has
+five keys; TCVAR-SV has nine, four of them new, and the sweep reads them in eight different
+places — so the shape is written down once, in the type, and the constructor is the only
+door into it.
+
+```julia
+# models/tcvar_sv/tcvar_sv_priors.jl
+const TCVARSVPriors = @NamedTuple{
+    initial_trend         :: MvNormal,        # τ₀            length n_trends
+    initial_cycle         :: MvNormal,        # ξ₀            length n*p, oldest-lag-first
+    trend_covariance      :: InverseWishart,  # Στ            n_trends × n_trends
+    cycle_covariance      :: InverseWishart,  # Σ̄  (mean only) n × n
+    cycle_β               :: MinnesotaPrior,  # β             carries n, p, k
+    volatility_mean       :: MvNormal,        # μ             length n
+    volatility_ar         :: MvNormal,        # Φ             length n (:diagonal) / n² (:full)
+    volatility_covariance :: InverseWishart,  # Ω             n × n
+    simultaneity          :: MvNormal,        # A₀            length n(n−1)÷2
+}
+```
+
+| key | type | shape | consumed by | note |
+|---|---|---|---|---|
+| `initial_trend` | `MvNormal` | `n_trends` | step 1 (`initial_state_mean/covariance`) | verbatim from TCVAR |
+| `initial_cycle` | `MvNormal` | `n*p` | step 1 | mean from `initial_cycle_prior`; its cycle covariance is overwritten each sweep from the Lyapunov solve at `Σ̄ = A₀⁻¹diag(exp(μ))A₀⁻ᵀ` (§2 step 1) |
+| `trend_covariance` | `InverseWishart` | `n_trends × n_trends` | step 2 | scale used as written, no rescaling |
+| `cycle_covariance` | `InverseWishart` | `n × n` | step 3 (`mean(·)` only) and sweep init | **not a sampled block any more** — see below |
+| `cycle_β` | `MinnesotaPrior` | `Φ₀ : k × n`, `Ω : k × k` | step 3 | sole source of `n` and `p` |
+| `volatility_mean` | `MvNormal` | `n` | step 6 | fixed wide normal, not the ergodic closure (D3) |
+| `volatility_ar` | `MvNormal` | `n` or `n²` | step 7 | `diag(Φ)` when `ar_structure = :diagonal`, `vec(Φᵀ)` when `:full` (D8) |
+| `volatility_covariance` | `InverseWishart` | `n × n` | step 8 | |
+| `simultaneity` | `MvNormal` | `n(n−1)÷2` | step 4 | free elements of `A₀` stacked row by row: `A₀[2,1], A₀[3,1], A₀[3,2], …` |
+
+The first five keys are byte-for-byte the TCVAR tuple (so `var_priors` output drops straight
+in), the last four are exactly what `sv_priors(n)` already returns. `tcvar_sv_priors` is
+therefore an assembly-plus-validation function, not a new source of prior distributions.
+
+**`cycle_covariance` under SV.** `Σc` is no longer a free parameter — `Σ_t = A₀⁻¹H_tA₀⁻ᵀ`
+is. The key stays because two things still need `Σ̄ = mean(priors.cycle_covariance)`: the
+Minnesota prior precision `P₀ = Σ̄⁻¹ ⊗ Ω_M⁻¹` of step 3 (D2) and the pilot initialisation of
+`h[1,:,:]`. Documented on the struct, so nobody goes looking for a `Σc` in the chain.
+
+**Not a key: `initial_volatility`.** Unlike `τ₀` and `ξ₀`, `h₀` has no prior of its own —
+`h_0 ~ N(μ, P₀)` with `P₀` the stationary covariance implied by the current `(Φ, Ω)` (§1).
+The diffuse fallback used when `Φ` has a unit root is a keyword of the sweep
+(`h0_covariance`), not a prior key, because it is a numerical fallback rather than a belief.
+
+#### Builder
+
+```julia
+"""
+    tcvar_sv_priors(; initial_trend, initial_cycle, trend_covariance, cycle_covariance,
+                      cycle_β, volatility_mean, volatility_ar, volatility_covariance,
+                      simultaneity, ar_structure = :diagonal) -> TCVARSVPriors
+
+    tcvar_sv_priors(tc_keys::NamedTuple, sv_keys::NamedTuple; ar_structure = :diagonal)
+"""
+```
+
+The keyword form is the canonical entry point (an unknown keyword is a `MethodError`
+there, which is the error you want for a typo); the two-tuple form is the convenience one
+that merges the output of `var_priors` and `sv_priors`:
+
+```julia
+Σc_prior, β_prior, c₀_prior = var_priors(0.2, 1, [0.5, 1.0, 2.0] .^ 2; δ = zeros(3))
+
+priors = tcvar_sv_priors(
+    (initial_trend    = MvNormal(τ₀_mean, τ₀_cov),
+     initial_cycle    = c₀_prior,
+     trend_covariance = InverseWishart(dτ, Ψτ),
+     cycle_covariance = Σc_prior,
+     cycle_β          = β_prior),
+    sv_priors(3))                      # the four SV keys, unchanged
+
+model = TCVARSV(trend_mapping, priors; ar_structure = :diagonal)
+```
+
+#### Validation, split exactly as TCVAR splits it
+
+`tcvar_sv_priors` checks everything that is *internal* to the tuple, reading `n = cycle_β.n`
+and `p = cycle_β.p`:
+
+```
+length(initial_cycle)     == n*p
+size(cycle_covariance)    == (n, n)
+size(volatility_covariance) == (n, n)
+length(volatility_mean)   == n
+length(volatility_ar)     == (ar_structure === :diagonal ? n : n^2)
+length(simultaneity)      == n*(n-1) ÷ 2
+size(trend_covariance, 1) == length(initial_trend)          # n_trends agrees with itself
+ar_structure ∈ (:diagonal, :full)
+```
+
+`TCVARSV(trend_mapping, priors; …)` then checks only what needs `trend_mapping`:
+`cycle_β.n == n_obs`, `length(initial_trend) == n_trends`,
+`size(trend_covariance) == (n_trends, n_trends)`, and the two name-vector lengths — the same
+list TCVAR's constructor runs today, minus the checks the tuple has already made. The
+struct's `ar_structure` field must match the one the tuple was built with, so the
+`volatility_ar` length check is repeated there (one `length` call).
+
+#### Three Julia facts this design depends on (checked on 1.12)
+
+1. **`NamedTuple` is invariant in its value-type parameter.** With abstract field types,
+   `(initial_trend = MvNormal(…), …) isa TCVARSVPriors` is `false` *even with the keys in
+   the declared order* — `Tuple{FullNormal}` is not `Tuple{MvNormal}` inside a `NamedTuple`
+   parameter. So never validate with `isa`; **construct**. `TCVARSVPriors(nt)` selects
+   fields by name (key order at the call site is free), converts, and throws `FieldError`
+   on a missing key / `MethodError` on a wrong distribution type. That construction is the
+   validation, and it is why the type is worth declaring at all.
+2. **The constructor drops keys the type does not name.** This is the one behavioural
+   difference from TCVAR, which stores the tuple verbatim: an extra key is silently
+   discarded rather than carried along. Taken deliberately — it is what makes the stored
+   tuple canonical — and the keyword form is recommended because there a stray key is a
+   loud `MethodError` instead.
+3. **`isconcretetype(TCVARSVPriors) == true`**, so `priors::TCVARSVPriors` is a proper
+   struct field type. The *field* types inside it are abstract, so `priors.volatility_ar`
+   is not type-stable; irrelevant, because the sweep unpacks the priors into locals once
+   before the loop rather than indexing the tuple inside it.
+
+Exported from `TCVAR.jl` alongside the model in stage 5: `TCVARSVPriors`, `tcvar_sv_priors`.
+
+### 4.3 Result type
 
 `TCVarSVResult` follows `TCVarResult` exactly — one `FlexiChain{VarName}` of matrix-valued
 parameters plus state arrays:
@@ -466,6 +595,8 @@ end
 `h` goes in the state arrays rather than the chain, for the same reason the trend and
 cycle paths do: it is a `T`-length path, not a fixed-size parameter block, and
 `compute_posterior_statistics` / `plot_states` already work on that shape.
+
+### 4.4 Initialisation and reporting
 
 Initialisation of the sweep: `h[1,:,:]` at `log` of the OLS residual variances of a
 homoskedastic pilot VAR on the initial cycle path, `A₀ = I`, `μ` at its prior mean,
@@ -642,6 +773,13 @@ a regression in the existing model can only come from one commit.
 - **D6 — 7-component KSC mixture.** Omori et al. (2007)'s 10-component table is a strictly
   better approximation and is a drop-in replacement for the constants in
   `ksc_mixture.jl`; not taken now, noted as a one-line upgrade path.
+- **D8 — `volatility_ar` carries `diag(Φ)` or `vec(Φᵀ)` depending on `ar_structure`.**
+  §3.4's `sv_priors(n)` returns a length-`n` `MvNormal` for the diagonal default; the
+  full-matrix option needs a length-`n²` prior on `vec(Φᵀ)`. `sv_priors` therefore takes
+  `ar_structure = :diagonal` and, under `:full`, returns the same prior lifted to `n²`
+  (mean `vec((ar_mean·I)ᵀ)`, covariance `ar_sd²·I`). The diagonal default is unchanged, so
+  nothing already committed moves.
+
 - **D7 — script 5.1 simulates stationary AR(1) volatilities, and infers `h` alone.**
   The spec words it as "simulated data of multivariate random walk model"; the block is
   instead driven by the `h_t = μ + Φ(h_{t-1}-μ) + ν_t` law of §1 with `(μ, Φ, Ω)` fixed

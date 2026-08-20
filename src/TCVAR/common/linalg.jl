@@ -42,3 +42,28 @@ function lyapunov_covariance(F::AbstractMatrix, Q::AbstractMatrix)
     n = size(F, 1)
     return reshape((I - kron(F, F)) \ vec(Q), n, n)
 end
+
+"""
+    psd_factor(A) -> Matrix
+
+Lower-triangular (or, in the singular case, merely square) factor `L` with
+`L*L' ≈ A` for a symmetric positive-*semi*definite `A`, so that
+`L * randn(n)` draws from `N(0, A)`.
+
+Unlike [`chol_psd`](@ref) this adds no jitter: a rank-deficient `A` keeps its exact
+null space, and `A = 0` gives `L = 0` (a degenerate, deterministic "draw"). That is
+what a *simulator* needs — jitter turns a deliberately switched-off noise block into
+draws with a standard deviation of `sqrt(sqrt(eps())) ≈ 1e-4`, which is the whole
+point of switching it off. [`chol_psd`](@ref) stays the right tool inside the filter,
+where the jitter guards a linear solve.
+
+The Cholesky factor is used when it exists; otherwise the symmetric eigendecomposition
+gives `L = V √Λ`, with negative eigenvalues (rounding around a zero) clamped to zero.
+"""
+function psd_factor(A::AbstractMatrix)
+    A_sym = Symmetric((A + A') / 2)
+    F = cholesky(A_sym; check = false)
+    issuccess(F) && return Matrix(F.L)
+    values, vectors = eigen(A_sym)
+    return vectors * Diagonal(sqrt.(max.(values, 0.0)))
+end

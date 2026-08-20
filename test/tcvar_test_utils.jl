@@ -65,3 +65,31 @@ function draw_median(draws)
     stacked = draw_matrix(draws)
     return dropdims(median(stacked, dims = 3), dims = 3)
 end
+
+"""
+    tcvar_sv_test_priors(; n, nt, p, λ, ψ, trend_variances, trend_df, ar_structure, …)
+        -> TCVARSVPriors
+
+The nine-key TCVAR-SV prior tuple used across the TCVAR-SV tests: the five TCVAR keys of
+[`tcvar_test_priors`](@ref) merged with `TCVAR.sv_priors(n; …)`, assembled and validated by
+`TCVAR.tcvar_sv_priors`.
+"""
+function tcvar_sv_test_priors(; n::Int = 3, nt::Int = 3, p::Int = 1, λ::Real = 0.5,
+                              ψ::AbstractVector = fill(1.0, n),
+                              trend_variances::AbstractVector = fill(0.02, nt),
+                              trend_df::Real = 20.0,
+                              initial_trend_mean::AbstractVector = zeros(nt),
+                              initial_trend_covariance::AbstractMatrix = diagm(ones(nt)),
+                              ar_structure::Symbol = :diagonal,
+                              volatility_level::Real = 0.1)
+
+    tc_keys = tcvar_test_priors(; n = n, nt = nt, p = p, λ = λ, ψ = ψ,
+                                trend_variances = trend_variances, trend_df = trend_df,
+                                initial_trend_mean = initial_trend_mean,
+                                initial_trend_covariance = initial_trend_covariance)
+
+    sv_keys = TCVAR.sv_priors(n; ar_structure = ar_structure,
+                              volatility_level = volatility_level)
+
+    return TCVAR.tcvar_sv_priors(tc_keys, sv_keys; ar_structure = ar_structure)
+end
