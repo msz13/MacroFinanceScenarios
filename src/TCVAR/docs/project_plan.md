@@ -64,7 +64,8 @@ o	Inne założenia aktywów, fat tails, itd
   - survey data
 - rodzaje modeli
   - tc var
-  - trend + ar cycle  + corelated innovations 
+  - trend + ar_cycle  + corelated innovations
+  - time varing coefficient params
 - różne measurement equtations - definicje trendów poszczególnych variables,
   - earnigns growth tylko gdp/consumtion growth trend vs addtional earnigns growth trend
   - dy/pe jako expectatons, równe definicje expectations
