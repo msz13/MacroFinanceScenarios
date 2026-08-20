@@ -70,7 +70,7 @@ scalar `ρ` per series and Clark–Ravazzolo 2015; a full matrix is supported), 
 full `n × n` covariance. Writing `h̃_t = h_t - μ` gives the plain VAR(1) `h̃_t = Φ h̃_{t-1} + ν_t`
 used by every step below. `P₀` defaults to the stationary covariance
 `vec(P₀) = (I - Φ⊗Φ)⁻¹ vec(Ω)` and falls back to a supplied diffuse matrix when `Φ` has a
-unit root (the random-walk special case used by script 1).
+unit root (the random-walk special case; every script here uses the stationary default).
 
 **Parameter vector:** `Στ, β, A₀, h_{0:T}, μ, Φ, Ω` plus the states `τ_{0:T}, c_{-p+1:T}`.
 
@@ -479,28 +479,42 @@ posterior mean with a credible band per series (`compute_posterior_statistics` v
 
 ## 5. Scripts
 
-New folder `scripts/tcvar_sv/`, each file runnable as
-`julia --project scripts/tcvar_sv/<name>.jl`, saving figures to `scripts/tcvar_sv/output/`
-and printing a comparison table to stdout. (The repo has no `scripts/` today; `analisys/`
-holds notebooks, which are not reproducible from the CLI.)
+New folder `analisys/simulated-data/tcvar_sv/`, each file runnable as
+`julia --project analisys/simulated-data/tcvar_sv/<name>.jl`, saving figures to
+`analisys/simulated-data/tcvar_sv/output/` and printing a comparison table to stdout.
+(The rest of `analisys/` holds notebooks, which are not reproducible from the CLI.)
 
-### 5.1 `sv_block_recovery.jl` — the SV block alone, random-walk volatilities
+### 5.1 `sv_block_recovery.jl` — the SV block alone, `h` only
 
-Matches the spec's "inference stochastic volatility based on simulated data of
-multivariate random walk model".
+Isolates step 5. **Only the state `h_{0:T}` is inferred**; every volatility parameter is
+held at its true value, and the volatilities are simulated from the *same* stationary
+AR(1)-with-mean law the target model assumes rather than from a random walk, so the block
+is exercised against the process it will actually meet in the sweep (**D7**).
 
-1. Simulate `n = 3, T = 500`: `h_t = h_{t-1} + ν_t`, `ν ~ N(0, Ω_true)` with a
-   deliberately **correlated** `Ω_true` (e.g. `0.02·[1 .5 .2; .5 1 .3; .2 .3 1]`),
-   `h_0 = log([0.5, 1.0, 2.0].^2)`; then `e_t ~ N(0, H_t)`.
-2. Run steps 5 + 8 only (`h` and `Ω`), holding `μ = 0`, `Φ = I` fixed — under a unit root
-   `μ` is unidentified, so it is not estimated here (§Step 6).
+1. Simulate `n = 3, T = 500` at known `(μ, Φ, Ω)`, in the §1 form:
+
+   ```
+   h_t = μ + Φ (h_{t-1} - μ) + ν_t,   ν_t ~ N(0, Ω_true),   h_0 ~ N(μ, P₀)
+   e_t ~ N(0, H_t),                   H_t = diag(exp(h_t))
+   ```
+
+   with `μ = log([0.5, 1.0, 2.0].^2)` (so the series sit at genuinely different volatility
+   levels), `Φ = 0.95·I` (diagonal, the default structure), a deliberately **correlated**
+   `Ω_true` (e.g. `0.02·[1 .5 .2; .5 1 .3; .2 .3 1]`), and `P₀` the stationary covariance
+   `vec(P₀) = (I - Φ⊗Φ)⁻¹ vec(Ω_true)`.
+2. Run **step 5 only** — `draw_mixture_indicators` + `draw_log_volatilities` — with
+   `μ, Φ, Ω` fixed at the truth. `Ω` is *not* drawn here; recovering it is 5.2's job. With
+   `Φ` stationary and `μ` known, the level of `h` is anchored by the model itself, so no
+   diffuse-`h_0` workaround is needed and any level error is a real defect of the block.
 3. Plot per series: true `exp(h_t/2)` vs posterior mean and 90% band; plus the realised
    `|e_t|` as a scatter for context. One figure, `n` stacked panels.
 4. Assert-style printout: RMSE of `exp(ĥ/2)` against truth, share of periods where the
-   truth lies inside the 90% band (target ≈ 0.9), and `Ω̂` mean/median vs `Ω_true`.
+   truth lies inside the 90% band (target ≈ 0.9), and the mean level `mean(ĥ_i)` vs `μ_i`
+   per series (the sharpest check that the `-1.2704` shift and the de-meaning are right).
 
 This script is the acceptance test for the block: it isolates `draw_mixture_indicators` +
-`draw_log_volatilities` + Carter–Kohn from every other moving part.
+`draw_log_volatilities` + Carter–Kohn from every other moving part, including the
+volatility-parameter draws.
 
 ### 5.2 `sv_posterior_checks.jl` — one block at a time, everything else at the truth
 
@@ -628,6 +642,13 @@ a regression in the existing model can only come from one commit.
 - **D6 — 7-component KSC mixture.** Omori et al. (2007)'s 10-component table is a strictly
   better approximation and is a drop-in replacement for the constants in
   `ksc_mixture.jl`; not taken now, noted as a one-line upgrade path.
+- **D7 — script 5.1 simulates stationary AR(1) volatilities, and infers `h` alone.**
+  The spec words it as "simulated data of multivariate random walk model"; the block is
+  instead driven by the `h_t = μ + Φ(h_{t-1}-μ) + ν_t` law of §1 with `(μ, Φ, Ω)` fixed
+  at the truth. Two reasons: the acceptance test then exercises exactly the process the
+  sweep will hand it (a unit root is a corner case of it, not the case), and with nothing
+  but `h` drawn there is no second block whose error could offset a bug in the first. `Ω`
+  recovery moves entirely to 5.2, where it is checked against a closed form.
 
 ## 9. Explicitly out of scope
 
