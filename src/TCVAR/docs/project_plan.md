@@ -75,6 +75,7 @@ o	Inne założenia aktywów, fat tails, itd
   - priors 
     - intial trend values (means) - albo mean of presample albo wartość obliczone inna metodą, np. hodrick prescot filter
     - initial volatility state - unconditioanl mean and variance of ar process
+    - volatility params - ar coefficient i variance fix, or estimated
 - #### wyzwania
   - explosive trends - mogą się odchylić do nierealnych wartości rozwiązania:
     - trend ar proces,
