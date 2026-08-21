@@ -70,7 +70,8 @@ o	Inne założenia aktywów, fat tails, itd
   - earnigns growth tylko gdp/consumtion growth trend vs addtional earnigns growth trend
   - dy/pe jako expectatons, równe definicje expectations:
     - trends + cycle
-    - loadings * trends +cycle 
+    - loadings * trends +cycle
+    - objective expectations - jak w present value model, parametry wynikają z danych
 - #### wyzwania
   - explosive trends - mogą się odchylić do nierealnych wartości rozwiązania:
     - trend ar proces,
