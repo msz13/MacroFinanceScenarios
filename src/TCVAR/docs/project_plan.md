@@ -62,6 +62,7 @@ o	Inne założenia aktywów, fat tails, itd
   - dodatkowo konsumpcja
   - dodatkowo expected volatility/equity risk premium
   - survey data
+  - yeld curce - rożne maturity yeld curve
 - rodzaje modeli
   - tc var
   - trend + ar_cycle  + corelated innovations
@@ -72,10 +73,12 @@ o	Inne założenia aktywów, fat tails, itd
     - trends + cycle
     - loadings * trends +cycle
     - objective expectations - jak w present value model, parametry wynikają z danych
+    - trend + measurement error/ measurement error as MA
   - priors 
     - intial trend values (means) - albo mean of presample albo wartość obliczone inna metodą, np. hodrick prescot filter
     - initial volatility state - unconditioanl mean and variance of ar process
     - volatility params - ar coefficient i variance fix, or estimated
+  - long term yelds as nielson siegel yeld curve (Natural rate chimera .. art)
 - #### wyzwania
   - explosive trends - mogą się odchylić do nierealnych wartości rozwiązania:
     - trend ar proces,
