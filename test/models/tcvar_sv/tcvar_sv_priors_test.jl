@@ -97,25 +97,15 @@ isdefined(TCVAR, :tcvar_sv_priors) || error(
                                                           Matrix(1.0I, nt + 1, nt + 1)),))
         @test_throws DimensionMismatch TCVAR.tcvar_sv_priors(wrong_trend, sv)
 
-        @test_throws ArgumentError TCVAR.tcvar_sv_priors(tc, sv; ar_structure = :block)
     end
 
-    @testset "ar_structure selects the volatility_ar length" begin
-        @test length(TCVAR.sv_priors(n).volatility_ar) == n
-        @test length(TCVAR.sv_priors(n; ar_structure = :full).volatility_ar) == n^2
-        # The :full prior is the same AR(1) belief lifted to vec(Φᵀ): centred on the
-        # diagonal matrix, every off-diagonal spillover shrunk towards zero.
-        @test mean(TCVAR.sv_priors(n; ar_structure = :full).volatility_ar) ==
-              vec(Matrix(0.8I, n, n))
-        @test_throws ArgumentError TCVAR.sv_priors(n; ar_structure = :block)
+    @testset "volatility_ar is the length-n prior on diag(Φ)" begin
+        # The volatility of each series is an AR(1) of its own — there is no
+        # unrestricted-Φ variant, so the n²-long prior on vec(Φᵀ) that sv_priors can
+        # build is a length error here rather than a second supported structure.
+        @test length(sv_keys().volatility_ar) == n
+        @test length(TCVAR.tcvar_sv_priors(tc_keys(), sv_keys()).volatility_ar) == n
 
-        full = TCVAR.tcvar_sv_priors(tc_keys(), TCVAR.sv_priors(n; ar_structure = :full);
-                                     ar_structure = :full)
-        @test length(full.volatility_ar) == n^2
-
-        # A diagonal prior under :full (and vice versa) is a length error, not silence.
-        @test_throws DimensionMismatch TCVAR.tcvar_sv_priors(tc_keys(), sv_keys();
-                                                             ar_structure = :full)
         @test_throws DimensionMismatch TCVAR.tcvar_sv_priors(
             tc_keys(), TCVAR.sv_priors(n; ar_structure = :full))
     end

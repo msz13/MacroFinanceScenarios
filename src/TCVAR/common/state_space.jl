@@ -100,8 +100,8 @@ constant_state_noise(model::TimeVaryingStateSpaceModel) =
     model.Q isa Matrix{Float64} ? model.R * model.Q * model.R' : nothing
 
 """
-    sample(model::AbstractStateSpaceModel, initial_state_mean, initial_state_covariance, n_steps)
-    sample(model::AbstractStateSpaceModel, initial_state, n_steps) -> (states, obs)
+    sample(model, initial_state_mean, initial_state_covariance, n_steps; jitter = 1e-4)
+    sample(model, initial_state, n_steps; jitter = 1e-4) -> (states, obs)
 
 Simulate `n_steps` periods forward from the state space model, drawing the starting
 state from `N(initial_state_mean, initial_state_covariance)` in the first form and
@@ -113,20 +113,30 @@ covariances are reached through [`process_noise`](@ref) / [`observation_noise`](
 so a [`TimeVaryingStateSpaceModel`](@ref) simulates with its own `Q_t` and `H_t` at
 every period; `states[t, :]` is drawn with `Q_t`, which leaves `Q_1` unused.
 
-A jitter of `1e-4` is added to both covariances from the second period on, so that a
-singular `Q` — the trend-cycle companion is full of exactly-zero rows — still factors.
-It also means a deliberately switched-off noise block still draws with a standard
-deviation of `1e-2`.
+Noise is drawn as `psd_factor(Σ + jitter*I) * randn(n)`. The default `jitter = 1e-4` is
+added to both covariances from the second period on, so that a singular `Q` — the
+trend-cycle companion is full of exactly-zero rows — still factors; it also means a
+deliberately switched-off noise block still draws with a standard deviation of `1e-2`.
+Pass `jitter = 0` when "off" has to mean exactly off: [`psd_factor`](@ref) keeps the exact
+null space of a rank-deficient covariance and turns a zero covariance into a deterministic
+zero draw, which is what [`simulate_volatility_path`](@ref) needs.
 """
-function sample(model::AbstractStateSpaceModel, initial_state_mean, initial_state_covariance, n_steps)
+function sample(model::AbstractStateSpaceModel, initial_state_mean, initial_state_covariance,
+                n_steps; jitter::Real = 1e-4)
 
     initial_states = rand(MvNormal(initial_state_mean, initial_state_covariance))
 
-    return sample(model, initial_states, n_steps)
+    return sample(model, initial_states, n_steps; jitter = jitter)
 
 end
 
-function sample(model::AbstractStateSpaceModel, initial_state, n_steps)
+"""Draw one `N(0, covariance + jitter*I)` noise vector of length `n`. For a
+positive-definite covariance this is the Cholesky factor applied to a `randn` vector, i.e.
+exactly what `rand(MvNormal(covariance))` draws."""
+noise_draw(covariance::AbstractMatrix, n::Int, jitter::Real) =
+    psd_factor(covariance + jitter * I) * randn(n)
+
+function sample(model::AbstractStateSpaceModel, initial_state, n_steps; jitter::Real = 1e-4)
 
     n_variables, n_states = size(model.Z)
     states = zeros(n_steps, n_states)
@@ -134,11 +144,11 @@ function sample(model::AbstractStateSpaceModel, initial_state, n_steps)
 
 
     states[1, :] = initial_state
-    obs[1, :] = model.Z * states[1,:] .+ rand(MvNormal(zeros(n_variables), observation_noise(model, 1)))
+    obs[1, :] = model.Z * states[1,:] + noise_draw(observation_noise(model, 1), n_variables, 0)
 
     for t in 2:n_steps
-        states[t,:] = model.T * states[t-1,:] + rand(MvNormal(zeros(n_states), process_noise(model, t) + I(n_states) .* 1e-4))
-        obs[t, :] = model.Z * states[t,:] + rand(MvNormal(zeros(n_variables), observation_noise(model, t) + I(n_variables) .* 1e-4))
+        states[t,:] = model.T * states[t-1,:] + noise_draw(process_noise(model, t), n_states, jitter)
+        obs[t, :] = model.Z * states[t,:] + noise_draw(observation_noise(model, t), n_variables, jitter)
     end
 
     return states, obs

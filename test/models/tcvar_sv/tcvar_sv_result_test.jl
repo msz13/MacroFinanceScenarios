@@ -228,12 +228,36 @@ end
             zeros(nt + n * lags), 1, n_steps)
     end
 
+    @testset "the volatility path is a state-space sample" begin
+        # The model itself — the demeaned VAR(1) shared with the Gibbs block — is pinned in
+        # common/sv/sv_block; what is tested here is the path `sample` draws from it.
+        params = simulator_params()
+        h1 = params.μ .+ [0.3, -0.2, 0.1]
+
+        # `sample` puts the starting state in the first row, and μ is added back to it.
+        Random.seed!(21)
+        h = TCVAR.simulate_volatility_path(params.μ, params.Φ, params.Ω, h1, 4_000)
+        @test size(h) == (4_000, n)
+        @test h[1, :] == h1
+
+        innovations = h[2:end, :] .- params.μ' .- (h[1:end-1, :] .- params.μ') * params.Φ'
+        @test cov(innovations) ≈ params.Ω rtol = 0.1
+
+        # With Ω = 0 the draw is deterministic — the demeaned path is exactly Φ^{t-1} h̃_1,
+        # and a path started at μ stays at μ. That is what `jitter = 0` buys.
+        decay = TCVAR.simulate_volatility_path(params.μ, params.Φ, zeros(n, n), h1, 6)
+        @test decay ≈ [params.μ[i] + 0.95^(t - 1) * (h1[i] - params.μ[i]) for t in 1:6, i in 1:n]
+        @test TCVAR.simulate_volatility_path(params.μ, params.Φ, zeros(n, n), params.μ, 50) ==
+              repeat(params.μ', 50)
+    end
+
     @testset "Ω = 0 reproduces a homoskedastic TCVAR path" begin
         # Switch the volatility innovations off and the simulator has to collapse onto a
-        # constant-Σ trend-cycle VAR at Σ = A₀⁻¹ diag(exp(μ)) A₀⁻ᵀ. psd_factor is what
-        # makes "off" mean exactly off for the volatility path — the state draw itself
-        # still picks up the 1e-4 jitter `sample` adds to Q, which is negligible against
-        # these variances but is why the trend below is not compared exactly.
+        # constant-Σ trend-cycle VAR at Σ = A₀⁻¹ diag(exp(μ)) A₀⁻ᵀ. The volatility path is
+        # sampled with `jitter = 0`, which is what makes "off" mean exactly off — the
+        # state draw itself still picks up the default 1e-4 jitter `sample` adds to Q,
+        # which is negligible against these variances but is why the trend below is not
+        # compared exactly.
         lags, long = 1, 20_000
         sv_model = TCVAR.TCVARSV(trend_mapping, tcvar_sv_test_priors(; n = n, nt = nt, p = lags),
                                  long)

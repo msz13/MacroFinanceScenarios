@@ -16,8 +16,8 @@ innovation covariance is `Σ_t = A₀⁻¹H_tA₀⁻ᵀ`, not a parameter) and t
   - `β`  : cycle VAR coefficients, `n_obs*p × n_obs`, predictors oldest-lag-first
   - `A₀` : simultaneity matrix, `n_obs × n_obs`, unit lower triangular
   - `μ`  : unconditional log-volatility level, a length-`n_obs` **vector**
-  - `Φ`  : log-volatility AR matrix, `n_obs × n_obs` (diagonal when
-    `model.ar_structure === :diagonal`, stored full either way)
+  - `Φ`  : log-volatility AR matrix, `n_obs × n_obs` — diagonal (one AR(1) per series),
+    stored as the full matrix
   - `Ω`  : log-volatility innovation covariance, `n_obs × n_obs`
 - `trend_states` : `n_kept × (T+1) × n_trends`, includes the initial state at `t = 0`
 - `cycle_states` : `n_kept × (T+p) × n_obs`, includes the `p` pre-sample periods
@@ -144,21 +144,22 @@ One `n_steps × n_obs` forward path of the log volatilities
 started at `h_1 = initial_volatility`, so row `t` lines up with period `t` of the state
 path simulated by [`sample`](@ref) (whose first row is likewise the starting state).
 
-The innovation factor comes from [`psd_factor`](@ref) rather than [`chol_psd`](@ref): with
-`Ω = 0` the path stays at `initial_volatility` exactly, instead of picking up jitter draws.
+The path *is* a state path: it comes out of [`sample`](@ref) applied to the demeaned
+VAR(1) of [`volatility_state_space`](@ref) — the very model the Gibbs block draws `h` from,
+here with its measurement switched off — with `μ` added back on the way out. The volatility
+and the trend-cycle state are therefore simulated by one and the same routine.
+
+`sample` is called with `jitter = 0`, so that with `Ω = 0` the path stays at
+`initial_volatility` exactly instead of picking up the jitter draws the default adds.
 """
 function simulate_volatility_path(μ, Φ, Ω, initial_volatility, n_steps::Int)
 
-    n_obs = length(μ)
-    Ω_factor = psd_factor(Ω)
+    level = collect(float.(μ))
+    demeaned, _ = sample(volatility_state_space(Φ, Ω),
+                         collect(float.(initial_volatility)) .- level,
+                         n_steps; jitter = 0)
 
-    h = zeros(n_steps, n_obs)
-    h[1, :] = initial_volatility
-    for t in 2:n_steps
-        h[t, :] = μ + Φ * (h[t-1, :] - μ) + Ω_factor * randn(n_obs)
-    end
-
-    return h
+    return demeaned .+ level'
 end
 
 """
@@ -229,8 +230,8 @@ oldest-lag-first) and the log volatility `initial_volatility`. This is the TCVAR
 counterpart of `simulate_scenarios(::TCVAR, …)`, and the generator of the simulated data
 the recovery scripts estimate.
 
-Each scenario draws its own volatility path
-([`simulate_volatility_path`](@ref)), turns it into the per-period cycle innovation
+Each scenario draws its own volatility path ([`simulate_volatility_path`](@ref), itself a
+[`sample`](@ref) of the volatility VAR(1)), turns it into the per-period cycle innovation
 covariances `Σ_t = A₀⁻¹H_tA₀⁻ᵀ` ([`cycle_covariance_path`](@ref)), writes those into a
 private copy of the skeleton via [`update_tc_var_sv!`](@ref) — one `Q_t` per simulated
 period, so `model.ssm` (whose `Q` is sized for the estimation sample) is left untouched —

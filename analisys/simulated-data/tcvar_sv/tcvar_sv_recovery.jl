@@ -222,8 +222,7 @@ TCVAR.is_stationary(Φ_TRUE, N_SERIES, 1) ||
 
 params = (Στ = Στ_TRUE, β = Β_TRUE, A₀ = A₀_TRUE, μ = MU_TRUE, Φ = Φ_TRUE, Ω = Ω_TRUE)
 model = TCVAR.TCVARSV(TREND_MAPPING, simulation_priors(Σ̄_TRUE), N_TIME;
-                variable_names = VARIABLE_NAMES, trend_names = TREND_NAMES,
-                ar_structure = :diagonal)
+                variable_names = VARIABLE_NAMES, trend_names = TREND_NAMES)
 
 initial_state = [TREND_START; stationary_cycle_start(A1_TRUE, Σ̄_TRUE, N_SERIES, N_LAGS)]
 initial_volatility = stationary_volatility_start(MU_TRUE, Φ_TRUE, Ω_TRUE)

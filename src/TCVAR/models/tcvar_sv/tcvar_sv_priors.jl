@@ -18,7 +18,7 @@ The nine priors of a TCVAR-SV model, as a fixed-shape `NamedTuple` type.
 | `cycle_covariance` | `InverseWishart` | `n × n` | `Σ̄ = mean(·)` only — **not a sampled block**, see below |
 | `cycle_β` | `MinnesotaPrior` | `Φ₀ : k × n`, `Ω : k × k` | `β`; the sole source of `n` and `p` |
 | `volatility_mean` | `MvNormal` | `n` | `μ` |
-| `volatility_ar` | `MvNormal` | `n` (`:diagonal`) or `n²` (`:full`) | `Φ` |
+| `volatility_ar` | `MvNormal` | `n` | `diag(Φ)` — the volatility is an AR(1) per series |
 | `volatility_covariance` | `InverseWishart` | `n × n` | `Ω` |
 | `simultaneity` | `MvNormal` | `n(n−1)÷2` | `A₀`, free elements row by row: `A₀[2,1], A₀[3,1], A₀[3,2], …` |
 
@@ -54,29 +54,17 @@ const TCVARSVPriors = @NamedTuple{
     cycle_covariance      :: InverseWishart,  # Σ̄  (mean only) n × n
     cycle_β               :: MinnesotaPrior,  # β             carries n, p, k
     volatility_mean       :: MvNormal,        # μ             length n
-    volatility_ar         :: MvNormal,        # Φ             length n (:diagonal) / n² (:full)
+    volatility_ar         :: MvNormal,        # diag(Φ)       length n
     volatility_covariance :: InverseWishart,  # Ω             n × n
     simultaneity          :: MvNormal,        # A₀            length n(n−1)÷2
 }
 
 """
-    volatility_ar_length(n, ar_structure) -> Int
-
-Length of the `volatility_ar` prior for `n` series: `n` for a diagonal `Φ` (one
-persistence per series) and `n^2` for a full `Φ` (the prior is on `vec(Φᵀ)`).
-"""
-function volatility_ar_length(n::Integer, ar_structure::Symbol)
-    ar_structure === :diagonal && return n
-    ar_structure === :full     && return n^2
-    throw(ArgumentError("ar_structure must be :diagonal or :full, got :$ar_structure"))
-end
-
-"""
     tcvar_sv_priors(; initial_trend, initial_cycle, trend_covariance, cycle_covariance,
                       cycle_β, volatility_mean, volatility_ar, volatility_covariance,
-                      simultaneity, ar_structure = :diagonal) -> TCVARSVPriors
+                      simultaneity) -> TCVARSVPriors
 
-    tcvar_sv_priors(tc_keys::NamedTuple, sv_keys::NamedTuple; ar_structure = :diagonal)
+    tcvar_sv_priors(tc_keys::NamedTuple, sv_keys::NamedTuple)
 
 Assemble and validate the nine priors of a TCVAR-SV model (see [`TCVARSVPriors`](@ref)).
 
@@ -88,9 +76,11 @@ named keys out of the merge and silently ignores anything else.
 Everything checked here is *internal to the tuple*, read off `cycle_β.n` and `cycle_β.p`.
 The checks that need the trend mapping — that `n` matches the number of observed series,
 and that `n_trends` matches its columns — belong to the [`TCVARSV`](@ref) constructor.
-`ar_structure` is not stored in the tuple; it only selects the expected length of
-`volatility_ar`, and [`TCVARSV`](@ref) re-checks that length against its own field so the
-two cannot drift apart.
+
+`volatility_ar` is a length-`n` prior on `diag(Φ)`: the log volatility of each series is an
+AR(1) of its own, so there is no unrestricted-`Φ` variant to select between. A length-`n²`
+prior on `vec(Φᵀ)` — what `sv_priors(n; ar_structure = :full)` builds — is a length error
+here.
 
 ```julia
 Σc_prior, β_prior, c₀_prior = var_priors(0.2, 1, [0.5, 1.0, 2.0] .^ 2; δ = zeros(3))
@@ -106,10 +96,9 @@ priors = tcvar_sv_priors(
 """
 function tcvar_sv_priors(; initial_trend, initial_cycle, trend_covariance, cycle_covariance,
                            cycle_β, volatility_mean, volatility_ar, volatility_covariance,
-                           simultaneity, ar_structure::Symbol = :diagonal)
+                           simultaneity)
 
     n, p = cycle_β.n, cycle_β.p
-    n_ar = volatility_ar_length(n, ar_structure)   # also validates ar_structure
 
     length(initial_cycle) == n * p || throw(DimensionMismatch(
         "initial_cycle must have length n*p = $(n * p), got $(length(initial_cycle))"))
@@ -119,9 +108,9 @@ function tcvar_sv_priors(; initial_trend, initial_cycle, trend_covariance, cycle
         "volatility_covariance must be $n × $n, got $(size(volatility_covariance))"))
     length(volatility_mean) == n || throw(DimensionMismatch(
         "volatility_mean must have length $n, got $(length(volatility_mean))"))
-    length(volatility_ar) == n_ar || throw(DimensionMismatch(
-        "volatility_ar must have length $n_ar for ar_structure = :$ar_structure, " *
-        "got $(length(volatility_ar))"))
+    length(volatility_ar) == n || throw(DimensionMismatch(
+        "volatility_ar must have length $n — it is the prior on diag(Φ), one AR(1) " *
+        "persistence per series — got $(length(volatility_ar))"))
     length(simultaneity) == n * (n - 1) ÷ 2 || throw(DimensionMismatch(
         "simultaneity must have length n*(n-1)÷2 = $(n * (n - 1) ÷ 2), " *
         "got $(length(simultaneity))"))
@@ -140,10 +129,9 @@ function tcvar_sv_priors(; initial_trend, initial_cycle, trend_covariance, cycle
                           simultaneity          = simultaneity))
 end
 
-function tcvar_sv_priors(tc_keys::NamedTuple, sv_keys::NamedTuple;
-                         ar_structure::Symbol = :diagonal)
+function tcvar_sv_priors(tc_keys::NamedTuple, sv_keys::NamedTuple)
     # Selecting the nine names is what drops the extras; a *missing* key still throws
     # (a FieldError naming it) rather than reaching the keyword method as `nothing`.
     selected = NamedTuple{fieldnames(TCVARSVPriors)}(merge(tc_keys, sv_keys))
-    return tcvar_sv_priors(; ar_structure = ar_structure, selected...)
+    return tcvar_sv_priors(; selected...)
 end

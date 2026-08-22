@@ -67,8 +67,7 @@ function draw_median(draws)
 end
 
 """
-    tcvar_sv_test_priors(; n, nt, p, λ, ψ, trend_variances, trend_df, ar_structure, …)
-        -> TCVARSVPriors
+    tcvar_sv_test_priors(; n, nt, p, λ, ψ, trend_variances, trend_df, …) -> TCVARSVPriors
 
 The nine-key TCVAR-SV prior tuple used across the TCVAR-SV tests: the five TCVAR keys of
 [`tcvar_test_priors`](@ref) merged with `TCVAR.sv_priors(n; …)`, assembled and validated by
@@ -80,7 +79,6 @@ function tcvar_sv_test_priors(; n::Int = 3, nt::Int = 3, p::Int = 1, λ::Real = 
                               trend_df::Real = 20.0,
                               initial_trend_mean::AbstractVector = zeros(nt),
                               initial_trend_covariance::AbstractMatrix = diagm(ones(nt)),
-                              ar_structure::Symbol = :diagonal,
                               volatility_level::Real = 0.1)
 
     tc_keys = tcvar_test_priors(; n = n, nt = nt, p = p, λ = λ, ψ = ψ,
@@ -88,8 +86,7 @@ function tcvar_sv_test_priors(; n::Int = 3, nt::Int = 3, p::Int = 1, λ::Real = 
                                 initial_trend_mean = initial_trend_mean,
                                 initial_trend_covariance = initial_trend_covariance)
 
-    sv_keys = TCVAR.sv_priors(n; ar_structure = ar_structure,
-                              volatility_level = volatility_level)
+    sv_keys = TCVAR.sv_priors(n; volatility_level = volatility_level)
 
-    return TCVAR.tcvar_sv_priors(tc_keys, sv_keys; ar_structure = ar_structure)
+    return TCVAR.tcvar_sv_priors(tc_keys, sv_keys)
 end

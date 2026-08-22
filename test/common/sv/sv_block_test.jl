@@ -82,6 +82,32 @@ end
         @test empirical ≈ mixture.probabilities atol = 0.01
     end
 
+    @testset "volatility_state_space is the demeaned VAR(1)" begin
+        # One model, two measurements: the simulator takes the noiseless default, the
+        # Gibbs block attaches the per-period mixture variances.
+        n = 2
+        Φ = [0.9 0.1; 0.0 0.8]
+        Ω = [0.05 0.01; 0.01 0.04]
+
+        model = TCVAR.volatility_state_space(Φ, Ω)
+
+        @test model.T == Φ                       # h̃_t = Φ h̃_{t-1} + ν_t
+        @test model.R == Matrix(1.0I, n, n)
+        @test model.Z == Matrix(1.0I, n, n)      # ỹ_t = h̃_t + z_t
+        @test model.Q == Ω
+        @test all(iszero, model.H)               # no measurement noise by default
+
+        # A time-varying H is passed straight through to the period accessor.
+        H_t = zeros(3, n, n)
+        for t in 1:3
+            H_t[t, :, :] = Matrix(float(t) * I, n, n)
+        end
+        varying = TCVAR.volatility_state_space(Φ, Ω, H_t)
+
+        @test [TCVAR.observation_noise(varying, t)[1, 1] for t in 1:3] == [1.0, 2.0, 3.0]
+        @test TCVAR.process_noise(varying, 2) == Ω
+    end
+
     @testset "draw_log_volatilities de-means by the component and by μ" begin
         # Ω enormous, prior on h̃_0 diffuse: the state has no pull, so the smoothed mean
         # of h_t collapses onto the de-meaned observation y*_t − m_{s_t}. Averaging over

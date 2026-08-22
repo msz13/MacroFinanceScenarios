@@ -88,7 +88,6 @@ isdefined(TCVAR, :TCVARSV) || error(
         priors = tcvar_sv_test_priors(; n = n, nt = nt, p = p)
         model = TCVAR.TCVARSV(trend_mapping, priors, n_time)
 
-        @test model.ar_structure === :diagonal
         @test model.variable_names == ["y1", "y2", "y3"]
         @test model.trend_names == ["τ1", "τ2", "τ3"]
         @test size(model.ssm.Q) == (n_time, nt + n * p, nt + n * p)
@@ -99,13 +98,13 @@ isdefined(TCVAR, :TCVARSV) || error(
                                                      variable_names = ["a", "b"])
         @test_throws DimensionMismatch TCVAR.TCVARSV(trend_mapping, priors, n_time;
                                                      trend_names = ["a"])
-        # The struct's ar_structure must match the tuple the priors were built with.
-        @test_throws DimensionMismatch TCVAR.TCVARSV(trend_mapping, priors, n_time;
-                                                     ar_structure = :full)
-
-        full_priors = tcvar_sv_test_priors(; n = n, nt = nt, p = p, ar_structure = :full)
-        @test TCVAR.TCVARSV(trend_mapping, full_priors, n_time;
-                            ar_structure = :full).ar_structure === :full
+        # The volatility is an AR(1) per series, so volatility_ar is a length-n prior on
+        # diag(Φ) — an n²-long one (a full Φ) is a length error, not a second structure.
+        # (built by conversion — tcvar_sv_priors rejects that length itself.)
+        full_ar = TCVAR.TCVARSVPriors(
+            merge(priors, (volatility_ar = MvNormal(vec(Matrix(0.8I, n, n)),
+                                                    Matrix(0.04I, n^2, n^2)),)))
+        @test_throws DimensionMismatch TCVAR.TCVARSV(trend_mapping, full_ar, n_time)
 
         # A different trend count needs a matching trend_covariance / initial_trend.
         wide = tcvar_sv_test_priors(; n = n, nt = 2, p = p)

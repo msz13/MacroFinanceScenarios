@@ -30,6 +30,36 @@ function stationary_volatility_covariance(Φ::AbstractMatrix, Ω::AbstractMatrix
 end
 
 """
+    volatility_state_space(Φ, Ω, observation_covariance = zeros(n, n))
+        -> TimeVaryingStateSpaceModel
+
+The log-volatility VAR(1) `h_t = μ + Φ (h_{t-1} − μ) + ν_t`, `ν_t ~ N(0, Ω)`, as a state
+space model in the demeaned volatility `h̃_t = h_t − μ`:
+
+    state:        h̃_t = Φ h̃_{t-1} + ν_t     (T = Φ, R = I, Q = Ω)
+    observation:  ỹ_t = h̃_t + z_t            (Z = I, H = observation_covariance)
+
+`μ` is not part of the model — a state space model has no intercept — so the caller demeans
+what it feeds in and adds `μ` back to the path that comes out. Both users of the volatility
+VAR(1) do exactly that, and differ only in the measurement they attach to it:
+
+* [`draw_log_volatilities`](@ref) passes the `n_time × n × n` KSC mixture variances
+  `H_t = diag(v²_{s_t})` and filters `ỹ_t = y*_t − m_{s_t} − μ` through them — a
+  covariance that moves every period, which is what
+  [`TimeVaryingStateSpaceModel`](@ref) exists for;
+* [`simulate_volatility_path`](@ref) leaves `H` at its zero default — a simulator wants
+  the state path itself, so its observation equation is a formality.
+"""
+function volatility_state_space(Φ::AbstractMatrix, Ω::AbstractMatrix,
+                                observation_covariance = zeros(size(Φ, 1), size(Φ, 1)))
+    n = size(Φ, 1)
+    identity_n = Matrix(1.0I, n, n)
+
+    return TimeVaryingStateSpaceModel(Matrix(float.(Φ)), identity_n, identity_n,
+                                      Matrix(float.(Ω)), observation_covariance)
+end
+
+"""
     draw_log_volatilities(y_star, indicators, params; h0_covariance = nothing) -> Matrix
 
 Draw the log-volatility path conditional on the mixture labels.
@@ -41,10 +71,9 @@ Gaussian state space in `h̃_t = h_t − μ`:
     measurement:  ỹ_t = h̃_t + z_t,        ỹ_t = y*_t − m_{s_t} − μ,  z_t ~ N(0, diag(v²_{s_t}))
     state:        h̃_t = Φ h̃_{t-1} + ν_t,  ν_t ~ N(0, Ω)
 
-i.e. `T = Φ, R = Z = I, Q = Ω` with a *time-varying* observation covariance — which is
-exactly what [`TimeVaryingStateSpaceModel`](@ref) exists for. `carter_kohn_sampler`
-returns `h̃_0` alongside `h̃_{1:T}`, so the `h_0` the volatility-parameter blocks need
-comes out of the same sweep.
+i.e. the state space model of [`volatility_state_space`](@ref) carrying a *time-varying*
+observation covariance. `carter_kohn_sampler` returns `h̃_0` alongside `h̃_{1:T}`, so the
+`h_0` the volatility-parameter blocks need comes out of the same sweep.
 
 `y_star` and `indicators` are `T × n`; `params` is a NamedTuple `(μ, Φ, Ω)`. Returns the
 `(T+1) × n` path `h_{0:T}` with `μ` added back, row `t+1` being period `t`.
@@ -75,8 +104,7 @@ function draw_log_volatilities(y_star::AbstractMatrix{<:Real}, indicators::Abstr
         observation_covariances[t, i, i] = variances[component]
     end
 
-    identity_n = Matrix(1.0I, n, n)
-    model = TimeVaryingStateSpaceModel(Φ, identity_n, identity_n, Ω, observation_covariances)
+    model = volatility_state_space(Φ, Ω, observation_covariances)
 
     initial_covariance = isnothing(h0_covariance) ? stationary_volatility_covariance(Φ, Ω) :
                                                     Matrix(float.(h0_covariance))

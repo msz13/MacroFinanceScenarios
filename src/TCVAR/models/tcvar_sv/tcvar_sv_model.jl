@@ -50,9 +50,11 @@ innovations are `ε_t ~ N(0, Σ_t)` with
     Σ_t = A₀⁻¹ H_t A₀⁻ᵀ,          H_t = diag(exp(h_{1t}), …, exp(h_{nt}))
     h_t = μ + Φ (h_{t-1} − μ) + ν_t,   ν_t ~ N(0, Ω)
 
-`A₀` is unit lower triangular and constant; only the variances move. Bundles the skeleton
-built by [`tc_var_sv`](@ref) with the priors and the variable / trend names, so the sampler
-receives one ready-made model.
+`A₀` is unit lower triangular and constant; only the variances move. `Φ` is diagonal — one
+AR(1) persistence per series, as in Clark–Ravazzolo — which is why `priors.volatility_ar`
+is always a length-`n` prior on `diag(Φ)`. Bundles the skeleton built by
+[`tc_var_sv`](@ref) with the priors and the variable / trend names, so the sampler receives
+one ready-made model.
 
 # Fields
 - `ssm::TimeVaryingStateSpaceModel` : skeleton with a 3-D `Q`; the draw-dependent blocks
@@ -60,9 +62,6 @@ receives one ready-made model.
 - `priors::TCVARSVPriors` : the nine priors, validated by [`tcvar_sv_priors`](@ref)
 - `variable_names::Vector{String}` : names of the observed variables
 - `trend_names::Vector{String}` : names of the trend states
-- `ar_structure::Symbol` : `:diagonal` (default — one AR(1) persistence per series, as in
-  Clark–Ravazzolo) or `:full` (an unrestricted `Φ`). It fixes the shape of the
-  `volatility_ar` prior, which is re-checked here against the tuple it was built with.
 
 !!! warning "The identification is ordering-dependent"
     `A₀` is a Cholesky-type factorisation of `Σ_t`: reordering the columns of the data
@@ -80,11 +79,10 @@ struct TCVARSV
     priors::TCVARSVPriors
     variable_names::Vector{String}
     trend_names::Vector{String}
-    ar_structure::Symbol
 end
 
 """
-    TCVARSV(trend_mapping, priors, n_time; variable_names, trend_names, ar_structure = :diagonal)
+    TCVARSV(trend_mapping, priors, n_time; variable_names, trend_names)
 
 Build a [`TCVARSV`](@ref) from an `n_obs × n_trends` trend-to-observation mapping, a
 validated [`TCVARSVPriors`](@ref) tuple and the sample length `n_time`. The number of lags
@@ -113,8 +111,7 @@ model = TCVARSV(Matrix(1.0I, 3, 3), priors, 400)
 """
 function TCVARSV(trend_mapping, priors::TCVARSVPriors, n_time::Int;
                  variable_names = default_variable_names(size(trend_mapping, 1)),
-                 trend_names = default_trend_names(size(trend_mapping, 2)),
-                 ar_structure::Symbol = :diagonal)
+                 trend_names = default_trend_names(size(trend_mapping, 2)))
 
     n_obs, n_trends = size(trend_mapping)
     β_prior = priors.cycle_β
@@ -126,13 +123,10 @@ function TCVARSV(trend_mapping, priors::TCVARSVPriors, n_time::Int;
         "priors.initial_trend must have length $n_trends"))
     size(priors.trend_covariance) == (n_trends, n_trends) || throw(DimensionMismatch(
         "priors.trend_covariance must be $n_trends × $n_trends"))
-    # Repeated from tcvar_sv_priors: the tuple does not carry ar_structure, so this is what
-    # ties the field to the prior the tuple was actually built with.
-    length(priors.volatility_ar) == volatility_ar_length(n_obs, ar_structure) ||
-        throw(DimensionMismatch(
-            "priors.volatility_ar has length $(length(priors.volatility_ar)), but " *
-            "ar_structure = :$ar_structure needs " *
-            "$(volatility_ar_length(n_obs, ar_structure))"))
+    # Φ is diagonal, so the prior is on its n diagonal elements — one AR(1) per series.
+    length(priors.volatility_ar) == n_obs || throw(DimensionMismatch(
+        "priors.volatility_ar must have length $n_obs — the volatility is an AR(1) per " *
+        "series, so the prior is on diag(Φ) — got $(length(priors.volatility_ar))"))
     length(variable_names) == n_obs ||
         throw(DimensionMismatch("variable_names must have length $n_obs"))
     length(trend_names) == n_trends ||
@@ -141,8 +135,7 @@ function TCVARSV(trend_mapping, priors::TCVARSVPriors, n_time::Int;
     return TCVARSV(tc_var_sv(trend_mapping, n_time; p = p),
                    priors,
                    collect(String, variable_names),
-                   collect(String, trend_names),
-                   ar_structure)
+                   collect(String, trend_names))
 end
 
 """
