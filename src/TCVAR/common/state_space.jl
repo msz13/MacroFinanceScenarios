@@ -99,7 +99,26 @@ constant_state_noise(model::StateSpaceModel) = model.R * model.Q * model.R'
 constant_state_noise(model::TimeVaryingStateSpaceModel) =
     model.Q isa Matrix{Float64} ? model.R * model.Q * model.R' : nothing
 
-function sample(model:: StateSpaceModel, initial_state_mean, initial_state_covariance, n_steps)
+"""
+    sample(model::AbstractStateSpaceModel, initial_state_mean, initial_state_covariance, n_steps)
+    sample(model::AbstractStateSpaceModel, initial_state, n_steps) -> (states, obs)
+
+Simulate `n_steps` periods forward from the state space model, drawing the starting
+state from `N(initial_state_mean, initial_state_covariance)` in the first form and
+taking it as given in the second.
+
+The first row is the starting state itself — `states[1, :] = initial_state`, with only
+the observation drawn — so the path contains `n_steps - 1` transitions. Both noise
+covariances are reached through [`process_noise`](@ref) / [`observation_noise`](@ref),
+so a [`TimeVaryingStateSpaceModel`](@ref) simulates with its own `Q_t` and `H_t` at
+every period; `states[t, :]` is drawn with `Q_t`, which leaves `Q_1` unused.
+
+A jitter of `1e-4` is added to both covariances from the second period on, so that a
+singular `Q` — the trend-cycle companion is full of exactly-zero rows — still factors.
+It also means a deliberately switched-off noise block still draws with a standard
+deviation of `1e-2`.
+"""
+function sample(model::AbstractStateSpaceModel, initial_state_mean, initial_state_covariance, n_steps)
 
     initial_states = rand(MvNormal(initial_state_mean, initial_state_covariance))
 
@@ -107,7 +126,7 @@ function sample(model:: StateSpaceModel, initial_state_mean, initial_state_covar
 
 end
 
-function sample(model:: StateSpaceModel, initial_state, n_steps)
+function sample(model::AbstractStateSpaceModel, initial_state, n_steps)
 
     n_variables, n_states = size(model.Z)
     states = zeros(n_steps, n_states)
@@ -115,11 +134,11 @@ function sample(model:: StateSpaceModel, initial_state, n_steps)
 
 
     states[1, :] = initial_state
-    obs[1, :] = model.Z * states[1,:] .+ rand(MvNormal(zeros(n_variables), model.H))
+    obs[1, :] = model.Z * states[1,:] .+ rand(MvNormal(zeros(n_variables), observation_noise(model, 1)))
 
     for t in 2:n_steps
-        states[t,:] = model.T * states[t-1,:] + rand(MvNormal(zeros(n_states), model.Q + I(n_states) .* 1e-4))
-        obs[t, :] = model.Z * states[t,:] + rand(MvNormal(zeros(n_variables), model.H + I(n_variables) .* 1e-4))
+        states[t,:] = model.T * states[t-1,:] + rand(MvNormal(zeros(n_states), process_noise(model, t) + I(n_states) .* 1e-4))
+        obs[t, :] = model.Z * states[t,:] + rand(MvNormal(zeros(n_variables), observation_noise(model, t) + I(n_variables) .* 1e-4))
     end
 
     return states, obs

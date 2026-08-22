@@ -673,7 +673,7 @@ Matches "inference full TCVAR with stochastic volatility with simulated data on 
 example parameters".
 
 1. Simulate a `n = 3, n_trends = 3, p = 1, T = 400` TCVAR-SV forward from known
-   `Στ, B, A₀, μ, Φ, Ω` (a `simulate_tcvar_sv` helper on the model, the SV analogue of
+   `Στ, B, A₀, μ, Φ, Ω` (the SV analogue of
    `simulate_scenarios`).
 2. Estimate with `gibbs_sampler(::TCVARSV, data; burnin = 5000, n_samples = 5000)`.
 3. Output: `plot_states` (trends + cycles vs simulated truth), `plot_volatilities`

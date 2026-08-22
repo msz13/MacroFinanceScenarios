@@ -102,7 +102,7 @@ end
     posterior_mean(result::TCVarSVResult)
 
 Posterior-mean parameters averaged over the retained Gibbs draws, as a NamedTuple
-`(Στ, β, A₀, μ, Φ, Ω)` — the same keys [`simulate_tcvar_sv`](@ref) takes.
+`(Στ, β, A₀, μ, Φ, Ω)` — the same keys [`simulate_scenarios`](@ref) takes.
 
 Each draw of a matrix-valued parameter is a matrix, so `mean` over the draws returns the
 posterior-mean matrix directly.
@@ -135,6 +135,59 @@ posterior_volatilities(result::TCVarSVResult; credible_level::Float64 = 0.90) =
                                  credible_level = credible_level)
 
 """
+    simulate_volatility_path(μ, Φ, Ω, initial_volatility, n_steps) -> Matrix
+
+One `n_steps × n_obs` forward path of the log volatilities
+
+    h_t = μ + Φ (h_{t-1} − μ) + ν_t,   ν_t ~ N(0, Ω)
+
+started at `h_1 = initial_volatility`, so row `t` lines up with period `t` of the state
+path simulated by [`sample`](@ref) (whose first row is likewise the starting state).
+
+The innovation factor comes from [`psd_factor`](@ref) rather than [`chol_psd`](@ref): with
+`Ω = 0` the path stays at `initial_volatility` exactly, instead of picking up jitter draws.
+"""
+function simulate_volatility_path(μ, Φ, Ω, initial_volatility, n_steps::Int)
+
+    n_obs = length(μ)
+    Ω_factor = psd_factor(Ω)
+
+    h = zeros(n_steps, n_obs)
+    h[1, :] = initial_volatility
+    for t in 2:n_steps
+        h[t, :] = μ + Φ * (h[t-1, :] - μ) + Ω_factor * randn(n_obs)
+    end
+
+    return h
+end
+
+"""
+    cycle_covariance_path(A₀, h) -> Array{Float64,3}
+
+The cycle innovation covariances `Σ_t = A₀⁻¹ H_t A₀⁻ᵀ`, `H_t = diag(exp(h_t))`, of a log
+volatility path `h` (`n_steps × n_obs`), in the `n_steps × n_obs × n_obs` layout
+[`update_tc_var_sv!`](@ref) writes into `Q`.
+
+`Σ_t` is built as `L Lᵀ` with `L = A₀⁻¹ diag(exp(h_t/2))` — positive semidefinite by
+construction — and symmetrised, since the two triangular solves need not agree to the last
+bit off the diagonal and the simulator factorises `Q_t`.
+"""
+function cycle_covariance_path(A₀, h::AbstractMatrix)
+
+    n_steps, n_obs = size(h)
+    # A₀ is unit lower triangular, so A₀ \ X is an O(n²) forward substitution.
+    A = LowerTriangular(Matrix(float.(A₀)))
+
+    covariances = zeros(n_steps, n_obs, n_obs)
+    for t in 1:n_steps
+        L = A \ Diagonal(exp.(h[t, :] ./ 2))
+        covariances[t, :, :] = Symmetric(L * L')
+    end
+
+    return covariances
+end
+
+"""
     simulate_scenarios(result::TCVarSVResult, n_scenarios, n_steps)
 
 Draw `n_scenarios` forward simulations of length `n_steps` from the estimated TCVAR-SV in
@@ -142,14 +195,14 @@ Draw `n_scenarios` forward simulations of length `n_steps` from the estimated TC
 
 Every scenario starts from the common posterior-mean terminal state — the last trend state,
 the last `p` cycle states flattened oldest-lag-first (`ξ = [c_{T-p+1}; …; c_T]`) and the
-last log volatility `h_T` — and then evolves stochastically, volatilities included, through
-[`simulate_tcvar_sv`](@ref). The model stored in `result` is left untouched.
+last log volatility `h_T` — and then evolves stochastically, volatilities included. The
+model stored in `result` is left untouched.
 
-Returns `(states, observations, volatilities)`:
+Returns `(states, observations, volatilities)`, all three with the same period axis:
 - `states::Array{Float64,3}`       : `n_scenarios × n_steps × (n_trends + n_obs*p)`
 - `observations::Array{Float64,3}` : `n_scenarios × n_steps × n_obs`
-- `volatilities::Array{Float64,3}` : `n_scenarios × (n_steps+1) × n_obs`, log scale, the
-  first row being the common starting `h_T`
+- `volatilities::Array{Float64,3}` : `n_scenarios × n_steps × n_obs`, log scale, the first
+  row being the common starting `h_T`
 """
 function simulate_scenarios(result::TCVarSVResult, n_scenarios::Int, n_steps::Int)
 
@@ -162,6 +215,76 @@ function simulate_scenarios(result::TCVarSVResult, n_scenarios::Int, n_steps::In
     cycle_start = vec(permutedims(cycle_mean[end-p+1:end, :]))
     volatility_start = vec(mean(result.volatilities[:, end, :], dims = 1))
 
-    return simulate_tcvar_sv(result.model, parameters, [trend_start; cycle_start],
-                             n_scenarios, n_steps; initial_volatility = volatility_start)
+    return simulate_scenarios(result.model, parameters, [trend_start; cycle_start],
+                              n_scenarios, n_steps; initial_volatility = volatility_start)
+end
+
+"""
+    simulate_scenarios(model::TCVARSV, params::NamedTuple, initial_state, n_scenarios,
+                       n_steps; initial_volatility = params.μ)
+
+Simulate from `model` at explicit parameters `params = (Στ, β, A₀, μ, Φ, Ω)` starting from
+`initial_state = [τ₀; ξ₀]` (the trend block, then the cycle companion stacked
+oldest-lag-first) and the log volatility `initial_volatility`. This is the TCVAR-SV
+counterpart of `simulate_scenarios(::TCVAR, …)`, and the generator of the simulated data
+the recovery scripts estimate.
+
+Each scenario draws its own volatility path
+([`simulate_volatility_path`](@ref)), turns it into the per-period cycle innovation
+covariances `Σ_t = A₀⁻¹H_tA₀⁻ᵀ` ([`cycle_covariance_path`](@ref)), writes those into a
+private copy of the skeleton via [`update_tc_var_sv!`](@ref) — one `Q_t` per simulated
+period, so `model.ssm` (whose `Q` is sized for the estimation sample) is left untouched —
+and hands the result to [`sample`](@ref).
+
+Since the path is simulated by [`sample`](@ref), the first row of every array is the
+starting state itself: `states[s, 1, :] == initial_state`, `volatilities[s, 1, :] ==
+initial_volatility`, and the `n_steps - 1` rows after it are the simulated periods. The
+observation is drawn with the skeleton's `H = eps()·I`, i.e. it is `y_t = Λ τ_t + c_t` up
+to the jitter [`sample`](@ref) adds to both covariances.
+
+Returns `(states, observations, volatilities)`:
+- `states::Array{Float64,3}`       : `n_scenarios × n_steps × (n_trends + n_obs*p)`
+- `observations::Array{Float64,3}` : `n_scenarios × n_steps × n_obs`
+- `volatilities::Array{Float64,3}` : `n_scenarios × n_steps × n_obs`, on the log scale
+"""
+function simulate_scenarios(model::TCVARSV, params::NamedTuple, initial_state::AbstractVector,
+                            n_scenarios::Int, n_steps::Int; initial_volatility = params.μ)
+
+    n_obs    = length(model.variable_names)
+    n_trends = length(model.trend_names)
+    n_states = size(model.ssm.Z, 2)
+    k        = n_states - n_trends            # n_obs * p
+    p        = k ÷ n_obs
+
+    n_steps ≥ 1 || throw(ArgumentError("n_steps must be ≥ 1, got $n_steps"))
+    size(params.β) == (k, n_obs) || throw(DimensionMismatch(
+        "params.β must be $((k, n_obs)) (k × n_obs, oldest-lag-first), got $(size(params.β))"))
+    length(initial_state) == n_states || throw(DimensionMismatch(
+        "initial_state must have length n_trends + n_obs*p = $n_states, " *
+        "got $(length(initial_state))"))
+    length(initial_volatility) == n_obs || throw(DimensionMismatch(
+        "initial_volatility must have length $n_obs, got $(length(initial_volatility))"))
+
+    # A private skeleton carrying one Q_t per *simulated* period: the model's own Q is
+    # sized for the estimation sample, and must stay untouched anyway.
+    skeleton = model.ssm
+    ssm = TimeVaryingStateSpaceModel(copy(skeleton.T), copy(skeleton.R), copy(skeleton.Z),
+                                     zeros(n_steps, n_states, n_states), copy(skeleton.H))
+    var_coeff = collect(float.(params.β)')     # n_obs × k, the companion bottom block
+
+    states       = zeros(n_scenarios, n_steps, n_states)
+    observations = zeros(n_scenarios, n_steps, n_obs)
+    volatilities = zeros(n_scenarios, n_steps, n_obs)
+
+    for s in 1:n_scenarios
+        h = simulate_volatility_path(params.μ, params.Φ, params.Ω, initial_volatility,
+                                     n_steps)
+        update_tc_var_sv!(ssm, var_coeff, params.Στ, cycle_covariance_path(params.A₀, h),
+                          n_trends, n_obs, p)
+
+        states[s, :, :], observations[s, :, :] = sample(ssm, initial_state, n_steps)
+        volatilities[s, :, :] = h
+    end
+
+    return states, observations, volatilities
 end

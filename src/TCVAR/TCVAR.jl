@@ -62,7 +62,7 @@ export carter_kohn_sampler
 export sv_priors, draw_stochastic_volatility, draw_mixture_indicators, draw_log_volatilities
 # models/tcvar_sv/
 export TCVARSV, TCVARSVPriors, tcvar_sv_priors, tc_var_sv, TCVarSVResult
-export simulate_tcvar_sv, posterior_volatilities
+export posterior_volatilities
 export compute_posterior_statistics
 # reporting/scenario_stats.jl
 export max_drawdown_and_length, returns_summarystats, cor_returns, annualise
