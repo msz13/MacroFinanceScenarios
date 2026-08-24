@@ -56,6 +56,7 @@ o	Inne założenia aktywów, fat tails, itd
 
 #### Pomysły na wariacje modelu"
 - dane
+  - tylko cash flow i valuations, div gorwth/dy or eps growth/ep + r star estimated elsware np. hlw
   - tylko asset returns
   - variables levels zamiast changes
   - pd changes zamiast level
