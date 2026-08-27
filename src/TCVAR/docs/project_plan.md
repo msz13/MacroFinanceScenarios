@@ -75,6 +75,9 @@ o	Inne założenia aktywów, fat tails, itd
     - loadings * trends +cycle
     - objective expectations - jak w present value model, parametry wynikają z danych
     - trend + measurement error/ measurement error as MA
+    - extrapolative belief
+    - extrapolative belief + AR
+    - change of believes - v*(gd - Egd_{t-1})
   - priors 
     - intial trend values (means) - albo mean of presample albo wartość obliczone inna metodą, np. hodrick prescot filter
     - initial volatility state - unconditioanl mean and variance of ar process
