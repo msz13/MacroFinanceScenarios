@@ -86,7 +86,7 @@ new code.
 |---|---|---|---|
 | 1 | TCVAR states | `τ_{0:T}, c_{-p+1:T}` | `carter_kohn_sampler` + `sample_states`, generalised to time-varying `Q_t` |
 | 2 | Trend covariance | `Στ` | `random_walk_covariance_posterior` **verbatim** |
-| 3 | Cycle VAR coefficients | `β` | new GLS posterior + existing `is_stationary`, `prepare_var_data`, Minnesota prior |
+| 3 | Cycle VAR coefficients | `β` | new equation-by-equation triangular draw (CCCM 2022) + existing `is_stationary`, `prepare_var_data`, Minnesota prior |
 | 4 | Simultaneity matrix | `A₀` | new: `n-1` weighted univariate regressions on the generic `normal_posterior` |
 | 5 | Volatilities | `h_{0:T}` (and mixture indicators `s`) | new SV block, built on `carter_kohn_sampler` |
 | 6 | Volatility mean | `μ` | new 5-line assembly on the generic `normal_posterior` |
@@ -121,31 +121,81 @@ Unchanged from TCVAR:
 > IW draw — no change is needed here. Where GLS genuinely enters is steps 3, 4, 6 and 7,
 > all of which are heteroskedastic. **Decision D1 below flags this for confirmation.**
 
-### Step 3 — cycle VAR coefficients `β` (GLS, heteroskedastic)
+### Step 3 — cycle VAR coefficients `β` (equation by equation, triangular algorithm)
 
-With `Σ_t` time varying the NIW conjugacy of `sample_var_params` is gone: `Σ` is no longer
-a free parameter that integrates out. The conditional of `vec(B)` is Normal:
+With `Σ_t` time varying the NIW conjugacy of `sample_var_params` is gone: `Σ` is no longer a
+free parameter that integrates out. The conditional of `vec(B)` is Normal, but its precision
+`Σ_t Σ_t⁻¹ ⊗ x_t x_tᵀ` is a dense `nk × nk` matrix to be assembled and factorised every
+sweep.
+
+**Carriero, Chan, Clark & Marcellino (2022)** avoid it. Because `A₀` is triangular the joint
+density of `c_t` factorises into `n` univariate conditionals, so `β` is drawn one equation at
+a time — `n` `k`-variate draws instead of one `nk`-variate draw. Write `a_{il} = A₀[i,l]`,
+`a_{ii} = 1`, `ε_{lt} = c_{lt} - x_tᵀ β_l`:
 
 ```
-c_t = (I_n ⊗ x_tᵀ) vec(B) + ε_t,   ε_t ~ N(0, Σ_t)
-
-P_d = Σ_t  Σ_t⁻¹ ⊗ x_t x_tᵀ                    (nk × nk)
-b_d = Σ_t  vec( x_t c_tᵀ Σ_t⁻¹ )               (nk)
-
-vec(B) | · ~ N( (P₀ + P_d)⁻¹ (P₀ vec(B₀) + b_d),  (P₀ + P_d)⁻¹ )
+u_{it} = Σ_{l ≤ i} a_{il} ε_{lt} ~ N(0, exp(h_{it})),   independent across i and t
 ```
 
-Prior precision `P₀ = Σ̄⁻¹ ⊗ Ω_M⁻¹` where `Ω_M = prior_row_covariance(β_prior)` is the
-Minnesota row covariance already in the codebase and `Σ̄ = mean(priors.cycle_covariance)`
-is the prior mean of the cycle innovation covariance — the Minnesota prior is
-`Φ|Σ ~ MN(Φ₀, Ω_M, Σ)` and with SV there is no single `Σ` to condition on, so it is fixed
-at its prior mean. This is the standard Cogley–Sargent choice; recorded as **D2**.
+`β_j` enters **every** equation `i ≥ j` — through `ε_{jt}`, with loading `a_{ij}` (the `j`-th
+*column* of `A₀`). Splitting that term off,
 
-Same stationarity-rejection loop as `sample_var_params` (`is_stationary` on the companion
-bottom block, `max_draws` cap).
+```
+u_{it} = a_{ij} (c_{jt} - x_tᵀ β_j) + c⁽ʲ⁾_{it},     c⁽ʲ⁾_{it} = Σ_{l ≤ i, l ≠ j} a_{il} ε_{lt}
+```
 
-Cost: `T · (n²k²)` accumulation — for `n = 5, p = 2` that is 400 × 2500 flops per sweep,
-negligible next to the Kalman pass.
+so equations `j … n` are `(n-j+1)·T` observations of one univariate weighted regression on
+`β_j`:
+
+```
+a_{ij} c_{jt} + c⁽ʲ⁾_{it} = a_{ij} x_tᵀ β_j + u_{it},   Var(u_{it}) = exp(h_{it}),   i = j … n
+
+P_j = Σ_t w_{jt} x_t x_tᵀ,                w_{jt} = Σ_{i≥j} a_{ij}² / exp(h_{it})      (k × k)
+b_j = Σ_t x_t Σ_{i≥j} a_{ij} (a_{ij} c_{jt} + c⁽ʲ⁾_{it}) / exp(h_{it})                 (k)
+
+β_j | β_{-j}, A₀, h, c ~ N( (V_j⁻¹ + P_j)⁻¹ (V_j⁻¹ β_{j0} + b_j), (V_j⁻¹ + P_j)⁻¹ )
+```
+
+for `j = 1 … n` in order, each conditioning on the equations already redrawn this sweep and
+on the rest at their incoming values. One pass per sweep. The pass is an ordinary Gibbs
+sub-sweep, not a joint draw — which is what the stationarity handling below turns on.
+
+**The `i > j` terms are the correction.** Carriero, Clark & Marcellino (2019) used equation
+`j` alone (`i = j`: the adjusted dependent variable `c_{jt} + Σ_{l<j} a_{jl} ε_{lt}`). That is
+the conditional of `β_j` given the *preceding* equations, not the full conditional given all
+the others, and a sweep built on it does not have the posterior as its invariant
+distribution; the 2022 corrigendum is exactly this fix. It is cheap: `w_{jt}` and the inner
+sum of `b_j` are scalars accumulated in `O(n)` per period, so the `k × k` cross-product still
+dominates.
+
+Two identities make the assembly checkable to machine precision, and both are tests (§6):
+
+* `w_{jt} = (A₀ᵀ H_t⁻¹ A₀)[j,j] = Σ_t⁻¹[j,j]` and `Σ_{i≥j} a_{ij} u_{it}/exp(h_{it}) = (Σ_t⁻¹ ε_t)_j`,
+  so `(P_j, b_j)` **is** the `j`-th diagonal block and `j`-th sub-vector of the full `nk` GLS
+  conditional. The equation-by-equation draw is a reparameterisation of the joint one, not an
+  approximation — and the 2019 form fails this identity, which is how the test catches it.
+* All `Σ_t = Σ` gives back the homoskedastic conditional; `n = 1` gives a plain weighted
+  regression.
+
+**Prior.** Equation-by-equation drawing needs a prior that factorises across equations,
+`V₀ = blockdiag(V_1, …, V_n)`. The Kronecker Minnesota precision `Σ̄⁻¹ ⊗ Ω_M⁻¹` does not —
+`Σ̄⁻¹` couples them — so `Σ̄` is replaced by `diag(Σ̄)`, giving `V_j = σ̄_j Ω_M` with
+`σ̄ = diag(mean(priors.cycle_covariance))` and `Ω_M = prior_row_covariance(β_prior)`. Every
+*marginal* prior variance is unchanged (`λ²/s² · σ̄_i/σ̄_j` for lag `s` of variable `j` in
+equation `i`, exactly what `MinnesotaPrior` documents); only the prior cross-equation
+correlations implied by the conjugate form are dropped. This is the independent
+("non-conjugate") Minnesota prior the CCM algorithm is written for. Recorded as **D2**.
+
+**Stationarity.** The rejection loop sits *inside* each equation, not around the pass:
+`β_j` is redrawn until the companion assembled from the proposal and the current `β_{-j}` is
+stationary, which is Gibbs on the stationarity-truncated posterior. After `max_draws` the
+equation keeps its incoming value, so the companion is stationary at every point of the
+sweep — step 1's Lyapunov initial covariance needs that. See **D10**.
+
+Cost: `O(n(k²T + k³) + n²T)` per sweep. At `n = 5, p = 2` that is well under the Kalman pass
+either way; the reason for the triangular form is correctness-by-construction of small
+separately checkable blocks (and that it is what a larger `n` would need), not speed at this
+size.
 
 ### Step 4 — simultaneity matrix `A₀`
 
@@ -167,8 +217,9 @@ a_i | · ~ N( (V_{i0}⁻¹ + P_d)⁻¹ (V_{i0}⁻¹ a_{i0} + b_d), (V_{i0}⁻¹ 
 Drawn row by row, `i = 2 … n`; row 1 has no free element. The regressor sign convention
 is fixed in the code so the drawn coefficients **are** `A₀[i,j]` with no post-hoc negation.
 
-`ε_t = c_t - Bᵀ x_t` are the cycle residuals from the just-drawn `β` (step 3), so this
-step follows step 3, matching the spec's ordering.
+`ε_t = c_t - Bᵀ x_t` are the cycle residuals from the just-drawn `β`, which step 3 already
+formed and returns (§3.5), so this step follows step 3 — matching the spec's ordering. Step 3
+in turn conditions on the previous sweep's `A₀`, the ordinary Gibbs ordering.
 
 > `A₀` is a Cholesky-type identification: results depend on the variable ordering in
 > `y`. Documented on the model struct.
@@ -277,8 +328,7 @@ for s in 2:n_draws
 
     τ, c   = sample_states(ssm, data, μ₀_state, P₀_state, n_trends, n_obs; p)   # 1
     Στ     = rand(random_walk_covariance_posterior(τ, Ψτ, dτ_post))       # 2
-    β      = draw_var_coefficients_gls(c, p, Σ_series, β₀, P₀_β)          # 3
-    ε      = cycle_residuals(c, β, p)
+    β, ε   = draw_var_coefficients_triangular(c, p, β, A₀, h[:, 1:T], β₀, V_inv)  # 3
     A₀     = draw_simultaneity(ε, h[:, 1:T], A₀_prior)                    # 4
     h, ω   = draw_stochastic_volatility(A₀ * ε', h, (μ, Φ, Ω))            # 5
     μ      = draw_volatility_mean(h, Φ, Ω, μ_prior)                       # 6
@@ -337,7 +387,7 @@ Three call sites today open-code this line (`stationary_cycle_covariance`,
 so it lands in `common/linalg.jl` rather than `var/companion.jl` as the earlier plan had it
 — that also keeps `common/sv/` from depending on `var/`.
 
-### 3.3 `common/posteriors.jl` — three additions
+### 3.3 `common/posteriors.jl` — two additions
 
 Keeping the file's existing split (`*_posterior` pure / `draw_*` consumes RNG):
 
@@ -345,11 +395,8 @@ Keeping the file's existing split (`*_posterior` pure / `draw_*` consumes RNG):
 """Conjugate normal update: N( (P₀+P_d)⁻¹(P₀μ₀ + b_d), (P₀+P_d)⁻¹ )."""
 normal_posterior(prior_mean, prior_precision, data_precision, data_information) -> MvNormal
 
-"""(P_d, b_d) for a multivariate heteroskedastic regression Y_t = (I ⊗ x_tᵀ)vec(B) + ε_t,
-   ε_t ~ N(0, Σ_t):  P_d = Σ Σ_t⁻¹⊗x_t x_tᵀ,  b_d = Σ vec(x_t y_tᵀ Σ_t⁻¹)."""
-gls_information(Y, X, Σ_inv_series) -> (Matrix, Vector)
-
-"""(P_d, b_d) for a univariate regression with known per-observation variances."""
+"""(P_d, b_d) for a univariate regression with known per-observation variances:
+   P_d = Σ z_t z_tᵀ / v_t,   b_d = Σ z_t y_t / v_t."""
 weighted_regression_information(y, Z, variances) -> (Matrix, Vector)
 ```
 
@@ -357,6 +404,12 @@ weighted_regression_information(y, Z, variances) -> (Matrix, Vector)
 each become a 3–5 line assembly of `(P_d, b_d)` in front of it. That is the whole point of
 the split: the model-specific arithmetic is the assembly, and each assembly is separately
 checkable against a closed form.
+
+What is **not** here: an earlier draft had `gls_information(Y, X, Σ_inv_series)` building the
+`nk × nk` heteroskedastic precision for step 3. The triangular draw never forms that matrix,
+and its per-equation assembly needs `A₀`, so it lives in `var/` instead (§3.5). Steps 3 and 4
+are then the same primitive — a weighted univariate regression — called with different
+weights.
 
 ### 3.4 `common/sv/` — new subfolder (model-agnostic, reused by any SV model)
 
@@ -414,13 +467,30 @@ centred at the same `log(0.1²)` is the change (**D3**).
 ```
 var/simultaneity.jl    draw_simultaneity(residuals, h, prior)  →  unit-lower-triangular A₀
                        simultaneity_covariances(A₀, h)         →  T-vector of Σ_t (and Σ_t⁻¹)
-var/var_sampling.jl    + draw_var_coefficients_gls(cycle, p, Σ_inv_series, β₀, P₀; max_draws)
+var/var_sampling.jl    + draw_var_coefficients_triangular(cycle, p, β, A₀, h, β₀, V_inv;
+                                                          max_draws)          → (β, ε)
+                       + triangular_equation_information(u, X, a_col, h, j, fitted)
+                                                                              → (P_j, b_j)
 ```
 
 `draw_simultaneity` is VAR-layer rather than `common/` because it is the structural
 factorisation of a VAR innovation covariance; `simultaneity_covariances` returns both
 `Σ_t` and `Σ_t⁻¹ = A₀ᵀ H_t⁻¹ A₀` (the inverse is available in closed form, so nothing is
-ever factorised numerically).
+ever factorised numerically). With the triangular draw in place, step 1 is now its only
+caller — step 3 uses `A₀` and `h` directly and never needs `Σ_t`.
+
+`draw_var_coefficients_triangular` takes the **current** `β` (`k × n`) and returns the
+updated one: the pass is sequential, and equations `j+1 … n` are still at their incoming
+values while equation `j` is drawn. `β₀` is the `k × n` prior mean (`prior_var_coeff(β_prior)'`,
+oldest-lag-first to match `prepare_var_data`'s `X`) and `V_inv` the `n` prior precisions
+`V_j⁻¹ = Ω_M⁻¹ / σ̄_j` (D2). It also returns the residuals `ε = c - Xβ` that step 4 consumes.
+
+Internally it carries the orthogonalised residuals `u = ε A₀ᵀ` across the equation loop, so
+`c⁽ʲ⁾_{it} = u_{it} - a_{ij} ε_{jt}` and therefore
+`a_{ij} c_{jt} + c⁽ʲ⁾_{it} = u_{it} + a_{ij}·(x_tᵀ β_j)` at the incoming `β_j` — the whole
+`(P_j, b_j)` assembly is then `O(k²T + nT)`, and after the draw only `ε_{j·}` and
+`u_{·,j:n}` need the `O(nT)` rank-one update. `u` is not returned: step 4 redraws `A₀`, so
+step 5 re-forms `A₀ ε` with the new one anyway.
 
 `sample_var_params` (the NIW/homoskedastic draw) is left exactly as it is — TCVAR keeps
 using it.
@@ -482,7 +552,7 @@ const TCVARSVPriors = @NamedTuple{
 | `initial_trend` | `MvNormal` | `n_trends` | step 1 (`initial_state_mean/covariance`) | verbatim from TCVAR |
 | `initial_cycle` | `MvNormal` | `n*p` | step 1 | mean from `initial_cycle_prior`; its cycle covariance is overwritten each sweep from the Lyapunov solve at `Σ̄ = A₀⁻¹diag(exp(μ))A₀⁻ᵀ` (§2 step 1) |
 | `trend_covariance` | `InverseWishart` | `n_trends × n_trends` | step 2 | scale used as written, no rescaling |
-| `cycle_covariance` | `InverseWishart` | `n × n` | step 3 (`mean(·)` only) and sweep init | **not a sampled block any more** — see below |
+| `cycle_covariance` | `InverseWishart` | `n × n` | step 3 (`diag(mean(·))` only) and sweep init | **not a sampled block any more** — see below |
 | `cycle_β` | `MinnesotaPrior` | `Φ₀ : k × n`, `Ω : k × k` | step 3 | sole source of `n` and `p` |
 | `volatility_mean` | `MvNormal` | `n` | step 6 | fixed wide normal, not the ergodic closure (D3) |
 | `volatility_ar` | `MvNormal` | `n` or `n²` | step 7 | `diag(Φ)` when `ar_structure = :diagonal`, `vec(Φᵀ)` when `:full` (D8) |
@@ -495,8 +565,11 @@ therefore an assembly-plus-validation function, not a new source of prior distri
 
 **`cycle_covariance` under SV.** `Σc` is no longer a free parameter — `Σ_t = A₀⁻¹H_tA₀⁻ᵀ`
 is. The key stays because two things still need `Σ̄ = mean(priors.cycle_covariance)`: the
-Minnesota prior precision `P₀ = Σ̄⁻¹ ⊗ Ω_M⁻¹` of step 3 (D2) and the pilot initialisation of
-`h[1,:,:]`. Documented on the struct, so nobody goes looking for a `Σc` in the chain.
+per-equation Minnesota prior precision `V_j⁻¹ = Ω_M⁻¹/σ̄_j`, `σ̄ = diag(Σ̄)`, of step 3 (D2),
+and the pilot initialisation of `h[1,:,:]`. Documented on the struct, so nobody goes looking
+for a `Σc` in the chain. The docstring already committed in
+`models/tcvar_sv/tcvar_sv_priors.jl` still states the Kronecker form `P₀ = Σ̄⁻¹ ⊗ Ω_M⁻¹`; it
+is corrected to the block-diagonal one in stage 4, with the sampler.
 
 **Not a key: `initial_volatility`.** Unlike `τ₀` and `ξ₀`, `h₀` has no prior of its own —
 `h_0 ~ N(μ, P₀)` with `P₀` the stationary covariance implied by the current `(Φ, Ω)` (§1).
@@ -656,7 +729,7 @@ times **conditioning on the true values of every other block**, and report
 
 | block | data simulated at | drawn by |
 |---|---|---|
-| `β` (GLS) | known `B, A₀, h` | `draw_var_coefficients_gls` |
+| `β` (triangular) | known `B, A₀, h` | `draw_var_coefficients_triangular` |
 | `A₀` | known `ε, h` | `draw_simultaneity` |
 | `μ` | known `h, Φ, Ω` | `draw_volatility_mean` |
 | `Φ` | known `h, μ, Ω` | `draw_volatility_ar` (both `:diagonal` and `:full`) |
@@ -666,6 +739,14 @@ Conditioning on the truth turns each into a single-block sampling problem whose 
 concentrates around the truth as `T` grows, so a bias in any one assembly shows up here
 and nowhere else. Also prints the sampling-error-scaled deviation
 `(mean - truth) / posterior sd` so the numbers are readable without a tolerance table.
+
+The `β` row needs one check the others do not. With `A₀` and `h` held at the truth the joint
+conditional of `vec(B)` is a closed-form `N(m, V)`; at `n = 3, p = 1` that is a `9 × 9` solve,
+so assemble it directly and compare the **Monte Carlo mean *and covariance* of the iterated
+equation-by-equation pass** against it. That is what separates the corrected algorithm from
+the 2019 one: dropping the `i > j` terms leaves the draws centred near the truth but gets the
+spread and the cross-equation dependence wrong, so a `true / mean / median` table alone would
+pass it.
 
 ### 5.3 `tcvar_sv_recovery.jl` — full model on simulated data
 
@@ -692,9 +773,7 @@ test/common/state_space_test.jl     process_noise/observation_noise dispatch;
                                     TimeVaryingStateSpaceModel with a constant Q_t
                                     reproduces StateSpaceModel bit-for-bit
 test/common/posteriors_test.jl      (existing) + normal_posterior vs closed form;
-                                    gls_information with all Σ_t = Σ equals the
-                                    homoskedastic X'Σ⁻¹X; weighted_regression_information
-                                    vs weighted least squares
+                                    weighted_regression_information vs weighted least squares
 test/common/sv/ksc_mixture_test.jl  Σq = 1; Σ q_j(m_j-1.2704) ≈ E[log χ²₁] = -1.2704;
                                     mixture variance ≈ π²/2; indicator draw is a valid
                                     categorical and concentrates on the right component
@@ -703,6 +782,13 @@ test/common/sv/sv_block_test.jl     h fixed at truth ⇒ indicator frequencies m
                                     the truth (seeded, loose tolerance)
 test/common/sv/sv_parameters_test.jl  each of steps 6/7/8 against its closed form on
                                     synthetic h with known (μ, Φ, Ω)
+test/var/var_sampling_test.jl       triangular_equation_information equals the j-th block and
+                                    j-th sub-vector of the full nk GLS conditional, to machine
+                                    precision (the CCCM-2022 identity — the 2019 form fails it);
+                                    equals the stacked weighted regression it collapses; all
+                                    Σ_t equal ⇒ the homoskedastic conditional; n = 1 ⇒ a plain
+                                    weighted regression; the iterated n-equation pass at fixed
+                                    (A₀, h) reproduces the closed-form joint N(m, V) of vec(B)
 test/var/simultaneity_test.jl       homoskedastic limit equals the OLS Cholesky factor;
                                     round-trip Σ_t = A₀⁻¹H_tA₀⁻ᵀ ⇒ A₀ recovered
 test/models/tcvar_sv/tcvar_sv_recovery_test.jl
@@ -725,7 +811,7 @@ Each stage is one commit and ends green on `julia --project test/runtests.jl`.
 **Stage 1 — the time-varying seam.** §3.1 + §3.2. No new model code. Verify: existing
 tests green *and* the seeded TCVAR draws are bit-identical to `main`.
 
-**Stage 2 — generic posteriors.** §3.3 (`normal_posterior`, `gls_information`,
+**Stage 2 — generic posteriors.** §3.3 (`normal_posterior`,
 `weighted_regression_information`) with `test/common/posteriors_test.jl` extended first.
 Pure additions, nothing repointed.
 
@@ -736,8 +822,10 @@ shift, the `log(e² + c̄)` offset and the demeaning all have to be right simult
 script 5.1 is what tells you they are.
 
 **Stage 4 — the remaining new blocks.** §3.5 (`simultaneity.jl`,
-`draw_var_coefficients_gls`) and `sv_parameters.jl`. Ships with its unit tests and
-**script 5.2**, which checks every one of them one at a time.
+`draw_var_coefficients_triangular`) and `sv_parameters.jl`, plus the `V_j⁻¹ = Ω_M⁻¹/σ̄_j`
+prior wiring of D2 and the docstring correction it implies in
+`models/tcvar_sv/tcvar_sv_priors.jl`. Ships with its unit tests — the joint-conditional
+identity of §6 above all — and **script 5.2**, which checks every one of them one at a time.
 
 **Stage 5 — the model.** `models/tcvar_sv/`: struct, skeleton, priors, result type,
 `simulate_tcvar_sv`. No sweep yet; the simulator is testable on its own (simulate at
@@ -755,12 +843,19 @@ a regression in the existing model can only come from one commit.
 ## 8. Decisions taken, and the ones worth confirming
 
 - **D1 — "trend covariance … with gls".** Read as: no change (the trend block has no
-  regressors, so GLS ≡ the existing conjugate IW draw), and GLS is applied where it
-  actually bites — steps 3, 4, 6, 7. **Confirm if something else was meant.**
-- **D2 — Minnesota prior under SV.** `Σ` is no longer a free parameter, so the
-  `Φ|Σ ~ MN(Φ₀, Ω_M, Σ)` prior is fixed at `Σ̄ = mean(priors.cycle_covariance)`
-  (Cogley–Sargent's choice). The alternative — rescaling by the current `Σ̄_t` average
-  each sweep — makes the prior data-dependent; not taken.
+  regressors, so GLS ≡ the existing conjugate IW draw). The heteroskedasticity is handled
+  exactly where it actually bites — steps 3, 4, 6, 7 — with step 3 doing it equation by
+  equation (D9) rather than as one `nk`-dimensional GLS assembly. **Confirm if something
+  else was meant.**
+- **D2 — Minnesota prior under SV: fixed at `Σ̄`, and block-diagonal.** Two departures from
+  the conjugate `Φ|Σ ~ MN(Φ₀, Ω_M, Σ)`. (i) `Σ` is no longer a free parameter, so the prior
+  is fixed at `Σ̄ = mean(priors.cycle_covariance)` — Cogley–Sargent's choice; the alternative,
+  rescaling by the current sweep's average `Σ_t`, makes the prior data-dependent and is not
+  taken. (ii) The equation-by-equation draw needs a prior that factorises across equations
+  and `Σ̄⁻¹ ⊗ Ω_M⁻¹` does not, so `Σ̄` is further replaced by `diag(Σ̄)`: `V_j = σ̄_j Ω_M`.
+  Every marginal prior variance is unchanged; only the prior cross-equation correlations
+  implied by the Kronecker form are dropped. This is the independent Minnesota prior the
+  CCM algorithm assumes.
 - **D3 — `μ` prior.** The closure form in today's `SV_priors.jl` conditions on `(ρ, σ²)`
   and would break step 6's conjugacy; replaced by a fixed wide `MvNormal` at the same
   centre.
@@ -787,6 +882,24 @@ a regression in the existing model can only come from one commit.
   sweep will hand it (a unit root is a corner case of it, not the case), and with nothing
   but `h` drawn there is no second block whose error could offset a bug in the first. `Ω`
   recovery moves entirely to 5.2, where it is checked against a closed form.
+- **D9 — `β` drawn equation by equation, with the CCCM (2022) correction.** Step 3 follows
+  the triangular algorithm of Carriero, Clark & Marcellino (2019) *as corrected by* Carriero,
+  Chan, Clark & Marcellino (2022): `n` `k`-variate draws in place of one `nk`-variate draw,
+  and each equation's conditional carrying the terms of **all** equations `i ≥ j`, not just
+  its own. The uncorrected form is a different kernel — the conditional given the preceding
+  equations — and its sweep does not target the posterior; the fix costs `O(nT)` per
+  equation. At `n ≤ 10` the joint draw would also be affordable, so this is not taken for
+  speed: it is taken because it is the algorithm the literature standardised on, because it
+  turns step 3 into the same small weighted regression as step 4, and because the exactness
+  of the reparameterisation is machine-precision testable (§6).
+- **D10 — stationarity rejection is per equation, and falls back to the incoming draw.**
+  The `n` equation draws are a Gibbs sub-sweep, not a joint draw, so the rejection loop
+  cannot wrap the whole pass; it sits inside each equation, where truncating that full
+  conditional to the stationary region is exactly Gibbs on the truncated posterior. On
+  exhausting `max_draws` the equation keeps its incoming value, so the companion is
+  stationary at every point of the sweep — which step 1's Lyapunov initial covariance
+  requires. `sample_var_params` instead returns its last proposal, stationary or not; the
+  difference is deliberate, and TCVAR is not touched.
 
 ## 9. Explicitly out of scope
 
@@ -807,6 +920,12 @@ a regression in the existing model can only come from one commit.
   Comparison with ARCH Models*, REStud — the 7-component mixture and the offset `c̄`.
 - Primiceri, G. (2005), *Time Varying Structural Vector Autoregressions and Monetary
   Policy*, REStud — the row-by-row `A₀` draw.
+- Carriero, A., Clark, T. & Marcellino, M. (2019), *Large Bayesian Vector Autoregressions
+  with Stochastic Volatility and Non-Conjugate Priors*, J. Econometrics — the triangular,
+  equation-by-equation draw of the VAR coefficients.
+- Carriero, A., Chan, J., Clark, T. & Marcellino, M. (2022), *Corrigendum to "Large Bayesian
+  Vector Autoregressions with Stochastic Volatility and Non-Conjugate Priors"*,
+  J. Econometrics — the `i ≥ j` terms that step 3 draws on (D9).
 - Clark, T. & Ravazzolo, F. (2015), *Macroeconomic Forecasting Performance under
   Alternative Specifications of Time-Varying Volatility*, JAE — the AR(1) SV priors.
 - Omori, Y., Chib, S., Shephard, N. & Nakajima, J. (2007), *Stochastic Volatility with

@@ -93,3 +93,9 @@ refactor file structure:
 
 TODO:
 initial_cycle - separate function uncondutional variance in var
+
+
+### testing strategies
+- gibs sampler unit test - both 
+- test notmal prior algebraic expressions, eqqe as gibs sampler
+- normal priors as gibs sampler, and data transformations
