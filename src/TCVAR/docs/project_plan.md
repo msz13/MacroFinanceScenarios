@@ -40,11 +40,12 @@ Powónwujemy rone specyfikacje trendow z modelem bez trendow - villani.
   -	Ewentualnie oba bez SV 
   -    bvar dla dy or cape, z average div yeld and earnings growth
 
--	#### In sample comparison
+-	#### In sample and Out of sample comparison
 o	Porównanie moments of simulated and real data dla całej próbki
 o	Predictive likehood /Marginal predictive likehood - https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2507827
 Marginalized Predictive Likelihood Comparisons of Linear Gaussian State-Space Models with Applications to DSGE, DSGE-VAR, and VAR Models
 o	Porównanie simulated moments dla kilku wybranych punktów, np. przed i po kryzysie, gdy parametry są oszacowane dla całej próbki
+- The density forecasts, constructed by fitting a Gaussian kernel to the simulated forecasts, are evaluated with the log predictive score (LPS). - dla symulowanych danych oblicza się kernel density
 o	Porfolio utility dla parametrów oszacowanych dla całej próbki
 -	#### out of smaple
 o	Moments of simulated data in periods
