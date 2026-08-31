@@ -99,3 +99,15 @@ initial_cycle - separate function uncondutional variance in var
 - gibs sampler unit test - both 
 - test notmal prior algebraic expressions, eqqe as gibs sampler
 - normal priors as gibs sampler, and data transformations
+
+$$
+\begin{array}{l||c|c|c|}
+\hline
+lp. & x & x^2 & x^3 \\
+\hline
+1. & 1 & 1 & 1 \\
+2. & 2 & 4 & 8 \\
+3. & 3 & 9 & 27 \\
+\hline
+\end{array}
+$$
