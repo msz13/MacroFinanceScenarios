@@ -1,6 +1,16 @@
 using Distributions, LinearAlgebra, Test
 
+
 isdefined(Main, :TCVAR) || include(joinpath(@__DIR__, "..", "src", "TCVAR", "TCVAR.jl"))
+
+# TCVAR members are reached as `TCVAR.f` rather than via `using .TCVAR` — see the note in
+# tcvar_test_utils.jl.
+isdefined(TCVAR, :inverse_wishart_posterior) || error(
+    "The TCVAR module loaded in this session predates inverse_wishart_posterior. " *
+    "Restart the Julia session (or REPL / IDE worker) and re-run.")
+
+using .TCVAR
+
 
 # Conjugate posterior for β in  Y = Xβ + ε,  ε ~ N(0, Σ),  β ~ N(prior.μ, prior.Σ).
 # MvNormalCanon takes the *canonical* parameters: precision J and potential η = J * mean,
@@ -14,8 +24,7 @@ function NormalBetaPosterior(Y, X, prior::MvNormal, Σ)
 end
 
 function normal_inverse_wishart_joint_prob(beta_prior, sigma_prior, y, x, Σ, beta)
-    return logpdf(beta_prior, beta) + logpdf(sigma_prior, Σ) + logpdf(MvNormal(x*beta, Σ), y)
-
+    return logpdf(beta_prior, beta) + logpdf(sigma_prior, Σ) + logpdf(MvNormal(vec(x * beta), Σ), y)
 end
 
 # Joint of Σ ~ IW(prior) and T residual rows ε_t ~ N(0, Σ), as a function of Σ.
@@ -55,30 +64,36 @@ end
 
     @testset "inverse_wishart_posterior" begin
         n = 2
+        p = 1
         T = 20
 
-        df_prior = rand()*100+1
+        # df has to stay well clear of the n - 1 existence bound, otherwise `rand` draws
+        # near-singular Σ's whose log densities are too large for the tolerance below.
+        df_prior = rand()*100 + n + 2
         scale_prior = diagm(rand(n))
         sigma_prior = InverseWishart(df_prior, scale_prior)
-        beta_prior = MvNormal(rand(n), diagm(rand(n)))
 
-        residuals = rand(T, n)
-        data = rand(n)
-        X = rand(n,n)
-        # the caller owns the degrees-of-freedom update: T rows of data are added to the prior
-        df_posterior = df_prior + T
+        Y, X = prepare_var_data(rand(T, n), p)
+
+        beta = rand(n * p, n)
+        residuals = Y - X * beta
+
+        # the caller owns the degrees-of-freedom update: one row per *usable* observation
+        # is added to the prior, and the p lags consumed by `prepare_var_data` are gone.
+        df_posterior = df_prior + size(residuals, 1)
 
         posterior = TCVAR.inverse_wishart_posterior(residuals, scale_prior, df_posterior)
 
         Σ1 = rand(sigma_prior)
         Σ2 = rand(sigma_prior)
-        beta = rand(n)
 
         sigma1_prob = logpdf(posterior, Σ1)
         sigma2_prob = logpdf(posterior, Σ2)
-      
-        joint_prob1 = normal_inverse_wishart_joint_prob(beta_prior, sigma_prior,data, X, Σ1, beta)
-        joint_prob2 = normal_inverse_wishart_joint_prob(beta_prior, sigma_prior,data, X, Σ2, beta)
+
+        # Conditional on β the joint is prior × the likelihood of *every* residual row —
+        # a single row would only identify a one-observation posterior.
+        joint_prob1 = inverse_wishart_joint_prob(sigma_prior, residuals, Σ1)
+        joint_prob2 = inverse_wishart_joint_prob(sigma_prior, residuals, Σ2)
 
         @test isapprox(sigma1_prob - sigma2_prob, joint_prob1 - joint_prob2, atol=1e-5)
     end
