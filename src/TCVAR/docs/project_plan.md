@@ -39,6 +39,7 @@ Powónwujemy rone specyfikacje trendow z modelem bez trendow - villani.
   -	TC-VAR with SV
   -	Ewentualnie oba bez SV 
   -    bvar dla dy or cape, z average div yeld and earnings growth
+  -    
 
 -	#### In sample and Out of sample comparison
 o	Porównanie moments of simulated and real data dla całej próbki
@@ -54,6 +55,8 @@ o	Forecast error and density – to samo co marginal predictive likehod
 o	Porfolio utlility 
 o	Different correlation on different regimes (macro regimes, stgflations, rozwój, itd) – impulse response functions
 o	Inne założenia aktywów, fat tails, itd
+- #### simulated data test
+- simulate data from steady state bvar, and check tcvar, and simulate from tcvar, and estimate SS-BVAR, simulate with and withoud Stochastic volatility.
 
 #### Pomysły na wariacje modelu"
 - dane
