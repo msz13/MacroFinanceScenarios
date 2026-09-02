@@ -5,8 +5,8 @@ isdefined(Main, :TCVAR) || include(joinpath(@__DIR__, "..", "src", "TCVAR", "TCV
 
 # TCVAR members are reached as `TCVAR.f` rather than via `using .TCVAR` — see the note in
 # tcvar_test_utils.jl.
-isdefined(TCVAR, :inverse_wishart_posterior) || error(
-    "The TCVAR module loaded in this session predates inverse_wishart_posterior. " *
+isdefined(TCVAR, :inverse_wishart_posterior) && isdefined(TCVAR, :alp_posterior) || error(
+    "The TCVAR module loaded in this session predates inverse_wishart_posterior / alp_posterior. " *
     "Restart the Julia session (or REPL / IDE worker) and re-run.")
 
 using .TCVAR
@@ -32,6 +32,25 @@ end
 function inverse_wishart_joint_prob(sigma_prior, residuals, Σ)
     n = size(residuals, 2)
     return logpdf(sigma_prior, Σ) + sum(logpdf(MvNormal(zeros(n), Σ), permutedims(residuals)))
+end
+
+# Covariance of `vec(Y - X*A)` implied by the structural form `alp_posterior` assumes:
+# B0 (yₜ - A'xₜ) = eₜ with eₜ ~ N(0, diag(exp(hₜ))) and B0 unit lower triangular, so the
+# reduced-form innovation uₜ = yₜ - A'xₜ has covariance Σₜ = B0⁻¹ diag(exp(hₜ)) B0⁻ᵀ.
+# `vec` stacks column by column, so series i at time t sits at row (i-1)T + t and the
+# Tn × Tn covariance is zero everywhere except between series of the same time period.
+function stochastic_volatility_covariance(B0, h)
+    T, n = size(h)
+    B0_inv = inv(B0)
+    Σ = zeros(T * n, T * n)
+    for t in 1:T
+        Σt = B0_inv * Diagonal(exp.(h[t, :])) * B0_inv'
+        Σt = (Σt + Σt') ./ 2                       # symmetric up to rounding only
+        for j in 1:n, i in 1:n
+            Σ[(i - 1) * T + t, (j - 1) * T + t] = Σt[i, j]
+        end
+    end
+    return Σ
 end
 
 @testset "conjugate posteriors" begin
@@ -96,5 +115,54 @@ end
         joint_prob2 = inverse_wishart_joint_prob(sigma_prior, residuals, Σ2)
 
         @test isapprox(sigma1_prob - sigma2_prob, joint_prob1 - joint_prob2, atol=1e-5)
+    end
+
+    @testset "alp_posterior" begin
+        n = 3
+        p = 1
+        T = 6
+        k = n * p
+
+        Y, X = prepare_var_data(rand(T + p, n), p)
+
+        # unit lower triangular structural matrix and a random-walk log-volatility path,
+        # standing in for one sweep's draws of B0 and h.
+        B0 = Matrix{Float64}(I, n, n)
+        for i in 2:n, j in 1:(i - 1)
+            B0[i, j] = randn()
+        end
+        h = cumsum(0.2 * randn(T, n), dims = 1)
+
+        alp0 = rand(n * k)
+        Valp = rand(n * k) .+ 0.5
+        beta_prior = MvNormal(alp0, Diagonal(Valp))
+
+        A = rand(k, n)                  # the draw the full conditionals condition on
+        posterior = TCVAR.alp_posterior(Y, X, A, B0, h, alp0, Valp)
+
+        # The joint sees one stacked regression, vec(Y) = (I ⊗ X) vec(A) + u, whose
+        # covariance carries the whole volatility path instead of a single Σ.
+        X_stacked = kron(Matrix{Float64}(I, n, n), X)
+        Σ = stochastic_volatility_covariance(B0, h)
+        sigma_prior = InverseWishart(size(Σ, 1) + 5.0, Matrix{Float64}(I, size(Σ)...))
+
+        # `posterior` is a product of *full conditionals*, each conditioning on the other
+        # columns of `A`, not the joint over vec(A). So only the tested column may move:
+        # the remaining factors — and their prior terms in the joint — are then identical
+        # and drop out of both differences.
+        for ii in 1:n
+            A1 = copy(A); A1[:, ii] = rand(k)
+            A2 = copy(A); A2[:, ii] = rand(k)
+
+            alp1_prob = logpdf(posterior, A1)
+            alp2_prob = logpdf(posterior, A2)
+
+            joint_prob1 = normal_inverse_wishart_joint_prob(
+                beta_prior, sigma_prior, vec(Y), X_stacked, Σ, vec(A1))
+            joint_prob2 = normal_inverse_wishart_joint_prob(
+                beta_prior, sigma_prior, vec(Y), X_stacked, Σ, vec(A2))
+
+            @test isapprox(alp1_prob - alp2_prob, joint_prob1 - joint_prob2, atol = 1e-5)
+        end
     end
 end

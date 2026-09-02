@@ -99,3 +99,64 @@ Draw from `N(vec(mean), L L')` given a precomputed lower-triangular factor `L`
 vectorised column-wise to match the Kronecker layout.
 """
 draw_from_factor(mean, L) = vec(mean) + L * randn(size(L, 1))
+
+"""
+    alp_posterior(Y, X, A, B0, h, alp0, Valp)
+ 
+Full-conditional posteriors of the VAR coefficients in a BVAR with stochastic
+volatility, built equation by equation as in the MATLAB routine, and returned as
+a `product_distribution` of `n` `k`-variate normals (one per equation) instead
+of a draw.
+ 
+Model: `(Y - X*A) * B0' = E`, with `E[t, j] ~ N(0, exp(h[t, j]))` and `B0` unit
+lower triangular. Column `ii` of `A` therefore shows up in the structural errors
+of equations `ii:n`, which is what the `ii:n` slices below select.
+ 
+Arguments
+- `Y`    : `T×n` observations
+- `X`    : `T×k` regressors (lags + deterministics)
+- `A`    : `k×n` current draw of the coefficients; each factor conditions on the
+           columns other than its own
+- `B0`   : `n×n` unit lower triangular structural matrix
+- `h`    : `T×n` log-volatilities
+- `alp0` : `nk` prior mean, stacked equation by equation (`vec` of a `k×n` matrix)
+- `Valp` : `nk` prior variances, same stacking (e.g. the second output of a
+           Minnesota prior, recomputed each sweep if the shrinkage
+           hyperparameters are themselves sampled)
+ 
+The returned object is a matrix-variate product distribution, so `rand(d)` gives
+a `k×n` matrix laid out exactly like `A`.
+"""
+function alp_posterior(Y::AbstractMatrix, X::AbstractMatrix, A::AbstractMatrix,
+                       B0::AbstractMatrix, h::AbstractMatrix,
+                       alp0::AbstractVector, Valp::AbstractVector)
+    T, n = size(Y)
+    k = size(X, 2)
+    @assert size(A) == (k, n)
+    @assert size(X, 1) == T && size(h) == (T, n)
+    @assert length(alp0) == length(Valp) == n * k
+ 
+    sqrt_exph = exp.(h ./ 2)
+    A = copy(A)                                     # never mutate the caller's A
+ 
+    dists = map(1:n) do ii
+        aii = A[:, ii]
+        A[:, ii] .= 0                               # drop equation ii's own fit
+ 
+        Λ  = vec(sqrt_exph[:, ii:n])                # T(n-ii+1)
+        yi = vec((Y - X * A) * B0[ii:n, :]') ./ Λ   # T(n-ii+1)
+        Wi = kron(B0[ii:n, ii], X) ./ Λ             # T(n-ii+1) × k
+ 
+        A[:, ii] .= aii                             # restore for the next equation
+ 
+        idx    = (ii - 1) * k + 1 : ii * k
+        iValpi = Diagonal(1 ./ view(Valp, idx))
+        alpi0  = view(alp0, idx)
+ 
+        Kalpi = Symmetric(iValpi + Wi' * Wi)        # posterior precision
+        bi    = iValpi * alpi0 + Wi' * yi          # potential vector
+        MvNormalCanon(bi, Kalpi)                    # mean = Kalpi \ bi, cov = inv(Kalpi)
+    end
+ 
+    return product_distribution(dists)
+end
