@@ -37,6 +37,7 @@ Powónwujemy rone specyfikacje trendow z modelem bez trendow - villani.
   -	TC VAR-SV – jeden trend dla zmiennej – wtedy jest podobne do steady state bvar z time varing state
   -	Zwykłdy TVP-VAR – czy identygikacja trendów coś daje
   -	TC-VAR with SV
+  -	TC-VAR -SVO - with outliers
   -	Ewentualnie oba bez SV 
   -    bvar dla dy or cape, z average div yeld and earnings growth
   -    
