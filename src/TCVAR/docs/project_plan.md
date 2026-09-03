@@ -64,6 +64,7 @@ o	Inne założenia aktywów, fat tails, itd
   - tylko cash flow i valuations, div gorwth/dy or eps growth/ep + r star estimated elsware np. hlw
   - tylko asset returns
   - variables levels zamiast changes
+  - varaibles changes, ale gdp my level cycles and trend growth as real activity and inflation paper
   - pd changes zamiast level
   - dodatkowo konsumpcja
   - dodatkowo expected volatility/equity risk premium
