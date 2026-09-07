@@ -92,10 +92,11 @@ end
         scale_prior = diagm(rand(n))
         sigma_prior = InverseWishart(df_prior, scale_prior)
 
-        Y, X = prepare_var_data(rand(T, n), p)
+        Y = rand(T,n)
+        X = rand(T,n)
 
         beta = rand(n * p, n)
-        residuals = Y - X * beta
+        residuals = rand(T,n)
 
         # the caller owns the degrees-of-freedom update: one row per *usable* observation
         # is added to the prior, and the p lags consumed by `prepare_var_data` are gone.
