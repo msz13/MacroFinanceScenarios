@@ -2,6 +2,7 @@ module TCVAR
 
 using Plots
 using Distributions
+using Distributions: PDMat
 using FlexiChains
 using FlexiChains: FlexiChain, Parameter
 #using StatsPlots

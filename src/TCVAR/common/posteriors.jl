@@ -58,11 +58,34 @@ Posterior mean of the conjugate normal regression coefficients,
 
 for `Y` (`T × n`) on `X` (`T × k`), with prior mean `β_prior_mean` (`k × n`) and
 prior precision `Ω_inv` (`k × k`). Returns the `k × n` posterior mean; note this
-is the *mean only* — the posterior covariance factor is
-[`kron_cholesky_factor`](@ref).
+is the *mean only* — the full conditional posterior, which takes it as input, is
+[`normal_coefficient_posterior`](@ref).
 """
 normal_coefficient_posterior_mean(Y, X, β_prior_mean, Ω_inv) =
     inv(X'X + Ω_inv) * (X'Y + Ω_inv * β_prior_mean)
+
+"""
+    normal_coefficient_posterior(β_posterior_mean, X, Σ, Ω_inv) -> MvNormal
+
+Conditional posterior of the conjugate normal regression coefficients given the
+innovation covariance `Σ`,
+
+    vec(β) | Σ, Y  ~  N(vec(β̂), Σ ⊗ (X'X + Ω⁻¹)⁻¹)
+
+for `X` (`T × k`), `Σ` (`n × n`) and prior precision `Ω_inv` (`k × k`), with
+`β̂ = β_posterior_mean` (`k × n`) from [`normal_coefficient_posterior_mean`](@ref) —
+passed in rather than recomputed, because callers also need it for the covariance
+posterior's scale. `vec` is column-major, so the vector stacks equation blocks, the
+layout `Σ ⊗ V` is written for.
+
+The covariance is carried by its [`kron_cholesky_factor`](@ref), so the `nk × nk`
+matrix is never factorised and `rand` draws what [`draw_from_factor`](@ref) draws from
+that factor. It follows that `cov` includes the factor's jitter.
+"""
+function normal_coefficient_posterior(β_posterior_mean, X, Σ, Ω_inv)
+    L = kron_cholesky_factor(Σ, inv(Symmetric(X'X + Ω_inv)))
+    return MvNormal(vec(β_posterior_mean), PDMat(Cholesky(LowerTriangular(L))))
+end
 
 """
     kron_cholesky_factor(Σ, V) -> L

@@ -97,6 +97,29 @@ isdefined(TCVAR, :random_walk_covariance_posterior) || error(
         @test L * L' ≈ kron(Σ, V) atol = 1e-4
     end
 
+    @testset "normal_coefficient_posterior" begin
+        Random.seed!(4)
+        T, k = 60, 3
+        X = randn(T, k)
+        β_hat = randn(k, 2)
+        Σ = [1.0 0.2; 0.2 0.5]
+        Ω_inv = diagm([2.0, 1.0, 0.5])
+        V = inv(X'X + Ω_inv)
+
+        d = TCVAR.normal_coefficient_posterior(β_hat, X, Σ, Ω_inv)
+
+        @test d isa MvNormal
+        @test mean(d) == vec(β_hat)
+        # Σ ⊗ (X'X + Ω⁻¹)⁻¹, to within the jitter of its Kronecker factor
+        @test cov(d) ≈ kron(Σ, V) atol = 1e-4
+
+        # a draw is the one draw_from_factor takes from the same factor and RNG state
+        L = TCVAR.kron_cholesky_factor(Σ, V)
+        Random.seed!(7); a = rand(d)
+        Random.seed!(7); b = TCVAR.draw_from_factor(β_hat, L)
+        @test a ≈ b
+    end
+
     @testset "draw_from_factor" begin
         Σ = [1.0 0.2; 0.2 0.5]
         V = [2.0 0.3; 0.3 1.0]
