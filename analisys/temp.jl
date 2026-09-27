@@ -29,3 +29,22 @@ D2 = diagm(sds2 .^2)
 covariance2 = A * D2 * A'
 
 corr2 = cov2cor(covariance2)
+
+using Distributions, LinearAlgebra
+
+dist = [MvNormal(zeros(4), I(4)), MvNormal(zeros(4), I(4))]
+
+p_d = product_distribution(dist)
+
+B = rand(p_d)
+
+logpdf(p_d, zeros(4,2))
+
+X = randn(50,4)
+
+X * B
+
+dist = [MvNormal(zeros(4),I(4)), InverseWishart(5, diagm(ones(4)))]
+
+normal_inverse_wishart = product_distribution(dist)
+

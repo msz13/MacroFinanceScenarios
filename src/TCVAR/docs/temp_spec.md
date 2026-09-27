@@ -93,3 +93,15 @@ refactor file structure:
 
 TODO:
 initial_cycle - separate function uncondutional variance in var
+
+
+TODO:
+- dokończyć tcbvar sv
+- zrobic ss bvar 
+- zrobic ss bvar
+- zrefactorowac tcvar - aby byl pelny natural conjugate priors
+
+
+and @src/TCVAR/common/posteriors.jl refactor, to create 
+to create to  sample_var_params to extract function which returns posterior draw of beta
+                       c

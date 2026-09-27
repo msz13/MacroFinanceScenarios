@@ -31,11 +31,11 @@ end
 
 
 """
-    normal_inverse_wishart_posterior(Y, X, Σ, β_prior_μ, Ω_inv, S, df)
-        -> product_distribution((β = MvNormal, Σ = InverseWishart))
+    normal_inverse_wishart_posterior(Y, X, β_prior_μ, Ω_inv, S, df)
+        -> (β = Σ -> MvNormal, Σ = InverseWishart)
 
-Normal–inverse-Wishart posterior of a conjugate VAR, its two blocks as one
-`product_distribution` keyed like a draw:
+Normal–inverse-Wishart posterior of a conjugate VAR, `p(β, Σ | Y) = p(β | Σ, Y) p(Σ | Y)`,
+its two blocks keyed like a draw:
 
     β:  vec(β) | Σ, Y  ~  N(vec(β̂), Σ ⊗ (X'X + Ω⁻¹)⁻¹)
     Σ:  Σ | Y          ~  IW(df, ε'ε + (β̂ − β₀)' Ω⁻¹ (β̂ − β₀) + S)
@@ -43,24 +43,20 @@ Normal–inverse-Wishart posterior of a conjugate VAR, its two blocks as one
 built by [`normal_coefficient_posterior`](@ref) and [`var_covariance_posterior`](@ref),
 with `β̂` from [`normal_coefficient_posterior_mean`](@ref) and `ε = Y − X β̂`. The
 arguments are those of [`sample_var_params`](@ref) on prepared data (`Y`, `X` from
-`prepare_var_data`), plus the covariance `Σ` the coefficient block is conditioned on.
+`prepare_var_data`).
 
-The joint posterior `p(β, Σ | Y) = p(β | Σ, Y) p(Σ | Y)` is not a product — the
-coefficient covariance depends on `Σ` — so this one is exact only at the `Σ` it was
-built with:
-
-- `logpdf(post, (β = vec(β), Σ = Σ))` at that same `Σ` is the joint NIW log density
-  (up to the jitter of [`kron_cholesky_factor`](@ref));
-- `rand(post)` is **not** a joint posterior draw: its `Σ` is independent of the one its
-  `β` was drawn under. Draw `Σ` first and the coefficients given that draw, as
-  [`sample_var_params`](@ref) does.
+The coefficient covariance depends on `Σ`, so the `β` block is the conditional posterior
+as a function of it, sharing `β̂` with the `Σ` block. A joint draw takes `Σ` from `post.Σ`
+first and the coefficients from `post.β(Σ)` at that draw, as [`sample_var_params`](@ref)
+does; `logpdf(post.β(Σ), vec(β)) + logpdf(post.Σ, Σ)` is the joint NIW log density (up to
+the jitter of [`kron_cholesky_factor`](@ref)).
 """
-function normal_inverse_wishart_posterior(Y, X, Σ, β_prior_μ, Ω_inv, S, df)
+function normal_inverse_wishart_posterior(Y, X, β_prior_μ, Ω_inv, S, df)
 
     β_hat = normal_coefficient_posterior_mean(Y, X, β_prior_μ, Ω_inv)
 
-    return product_distribution((β = normal_coefficient_posterior(β_hat, X, Σ, Ω_inv),
-                                 Σ = var_covariance_posterior(Y, X, β_hat, df, S, β_prior_μ, Ω_inv)))
+    return (β = Σ -> normal_coefficient_posterior(β_hat, X, Σ, Ω_inv),
+            Σ = var_covariance_posterior(Y, X, β_hat, df, S, β_prior_μ, Ω_inv))
 
 end
 
@@ -80,15 +76,14 @@ function sample_var_params(data, p, β_prior_μ, Ω_inv, S, df; max_draws::Int =
     Y, X = prepare_var_data(data, p)
     n = size(Y, 2)
 
-    β_hat = normal_coefficient_posterior_mean(Y, X, β_prior_μ, Ω_inv)
+    posterior = normal_inverse_wishart_posterior(Y, X, β_prior_μ, Ω_inv, S, df)
 
-    # The two blocks of `normal_inverse_wishart_posterior`, drawn in sequence: Σ from its
-    # marginal posterior, then β conditional on that draw.
-    Σ = rand(var_covariance_posterior(Y, X, β_hat, df, S, β_prior_μ, Ω_inv))
+    # Σ from its marginal posterior, then β conditional on that draw.
+    Σ = rand(posterior.Σ)
 
     # Σ and X are fixed across rejection draws, so the coefficient posterior — and the
     # factor of Σ ⊗ (X'X + Ω⁻¹)⁻¹ it carries — is built once and reused.
-    β_posterior = normal_coefficient_posterior(β_hat, X, Σ, Ω_inv)
+    β_posterior = posterior.β(Σ)
     β = rand(β_posterior)
 
     # Companion bottom block A = B' (n × n*p) in oldest-lag-first ordering.
