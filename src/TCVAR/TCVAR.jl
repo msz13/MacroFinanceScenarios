@@ -6,6 +6,7 @@ using FlexiChains
 using FlexiChains: FlexiChain, Parameter
 #using StatsPlots
 using LinearAlgebra
+using Random
 
 using StatsBase
 using PrettyTables
@@ -32,6 +33,7 @@ include("common/sv/sv_priors.jl")
 include("var/var_data.jl")
 include("var/companion.jl")
 include("var/minnesota_prior.jl")    # defines MinnesotaPrior, needed by var_sampling.jl and tcvar_priors.jl
+include("var/natural_conjugate.jl")  # defines NaturalConjugate, needed by var_sampling.jl
 include("var/var_sampling.jl")
 
 # models/tcvar/ — the trend-cycle VAR itself

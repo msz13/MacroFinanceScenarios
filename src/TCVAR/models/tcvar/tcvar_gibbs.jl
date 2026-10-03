@@ -46,19 +46,14 @@ function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1
 
     # --- prior quantities read straight off the distributions ---
     ντ, Ψτ = params(priors.trend_covariance)   # (degrees of freedom, PDMat scale)
-    νc, Ψc = params(priors.cycle_covariance)
 
     #posterior degrees pf freedom for trend covariance matrix
     #(trend innovations = diff of the n_time_steps + 1 trend states = n_time_steps)
     dτ_post = n_trend_time_steps - 1 + ντ
 
-    #posterior degrees pf freedom for cycle covariance matrix
-    #(cycle regressions = n_cycle_time_steps - p = n_time_steps)
-    dc_post = n_cycle_time_steps - p + νc
-
-    #IW scales are used as written; the cycle prior mean is Ψc/(νc-n-1)
+    #IW scales are used as written; the cycle covariance posterior (its df and
+    #scale) is assembled by NaturalConjugate from priors.cycle_covariance
     trend_covariance_scale = Matrix(Ψτ)
-    cycle_covariance_scale = Matrix(Ψc)
     cycle_covariance_mean  = mean(priors.cycle_covariance)
 
     #cycle VAR prior in the sampler's oldest-lag-first, no-intercept layout
@@ -110,7 +105,7 @@ function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1
 
         trend_covariance[s, :, :] = rand(random_walk_covariance_posterior(trends_states[s,:,:], trend_covariance_scale, dτ_post))
 
-        betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], p, cycle_coeff_mean, Ω_inv, cycle_covariance_scale, dc_post)
+        betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], p, cycle_coeff_mean, Ω_inv, priors.cycle_covariance)
 
         # Update the model with the newly drawn parameters for the next iteration,
         # mutating only the blocks that change (transition cycle block, the two
