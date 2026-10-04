@@ -57,7 +57,7 @@ export tc_var, sample
 export prepare_var_data #TODO remove and use in sample function
 export plot_variable_states, plot_states
 export gibbs_sampler, MinnesotaPrior, TCVarResult
-export var_priors, initial_cycle_prior, prior_var_coeff, prior_row_covariance
+export var_priors, initial_cycle_prior, prior_var_coeff, prior_coeff_mean, prior_row_precision
 export posterior_mean, simulate_scenarios
 export carter_kohn_sampler
 # common/sv/

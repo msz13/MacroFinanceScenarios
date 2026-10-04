@@ -62,7 +62,7 @@ end
     draws = fake_sv_draws(; n_draws = n_draws, n_time = n_time, n = n, nt = nt, p = p)
 
     # The sampler leaves the skeleton filled in; build_result has to hand it back empty.
-    TCVAR.update_tc_var_sv!(model.ssm, ones(n, k), ones(nt, nt), ones(n_time, n, n), nt, n, p)
+    TCVAR.update_tc_var_sv!(model.ssm, ones(k * n), ones(nt, nt), ones(n_time, n, n), nt, n, p)
 
     result = TCVAR.build_result(model, draws.trend_states, draws.cycle_states,
                                 draws.volatilities, draws.trend_covariance, draws.betas,

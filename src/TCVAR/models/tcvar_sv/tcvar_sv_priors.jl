@@ -16,7 +16,7 @@ The nine priors of a TCVAR-SV model, as a fixed-shape `NamedTuple` type.
 | `initial_cycle` | `MvNormal` | `n*p` | state draw — `ξ₀ = [c_{-p+1}; …; c_0]`, oldest-lag-first |
 | `trend_covariance` | `InverseWishart` | `n_trends × n_trends` | `Στ`; scale used as written, no rescaling |
 | `cycle_covariance` | `InverseWishart` | `n × n` | `Σ̄ = mean(·)` only — **not a sampled block**, see below |
-| `cycle_β` | `MinnesotaPrior` | `Φ₀ : k × n`, `Ω : k × k` | `β`; the sole source of `n` and `p` |
+| `cycle_β` | `MinnesotaPrior` | `Φ₀ : k × n`, `Ω_inv : k × k` | `β`; the sole source of `n` and `p` |
 | `volatility_mean` | `MvNormal` | `n` | `μ` |
 | `volatility_ar` | `MvNormal` | `n` | `diag(Φ)` — the volatility is an AR(1) per series |
 | `volatility_covariance` | `InverseWishart` | `n × n` | `Ω` |

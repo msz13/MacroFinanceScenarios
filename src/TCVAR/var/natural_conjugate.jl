@@ -84,12 +84,14 @@ function kron_cholesky_factor(Σ, V)
 end
 
 """
-    NaturalConjugate(Y, X, β_prior_μ, Ω_inv, sigma_prior::InverseWishart)
+    NaturalConjugate(Y, X, β_prior::MinnesotaPrior, sigma_prior::InverseWishart)
 
 Joint posterior of `(vec(B), Σ)` for the conjugate VAR described above.
 
-`β_prior_μ` is the `k × n` prior mean `B₀`, `Ω_inv` the `k × k` prior row precision
-`Ω⁻¹`, and `sigma_prior` the `IW(ν₀, S₀)` prior on `Σ`.
+The coefficient prior is read off `β_prior`: `B₀` from [`prior_coeff_mean`](@ref) and
+`Ω⁻¹` from [`prior_row_precision`](@ref). Both are in the oldest-lag-first, no-intercept
+layout of [`prepare_var_data`](@ref), so `X` must have `k = n*p` columns.
+`sigma_prior` is the `IW(ν₀, S₀)` prior on `Σ`.
 
 `rand(d)` returns `(β, Σ)` with `β = vec(B)`; `logpdf(d, β, Σ)` is the joint posterior
 log density. The marginal of `Σ` is [`covariance_posterior`](@ref) and the conditional
@@ -101,10 +103,16 @@ struct NaturalConjugate{TB<:AbstractMatrix,TΩ<:AbstractMatrix,TS<:InverseWishar
     Σ_posterior::TS
 end
 
-function NaturalConjugate(Y, X, β_prior_μ, Ω_inv, sigma_prior::InverseWishart)
-    ν₀, S₀ = params(sigma_prior)
+function NaturalConjugate(Y, X, β_prior::MinnesotaPrior, sigma_prior::InverseWishart)
+    size(X, 2) == β_prior.n * β_prior.p || throw(DimensionMismatch(
+        "X has $(size(X, 2)) columns but the prior expects n*p = $(β_prior.n * β_prior.p)"))
 
-    β_μ = normal_coefficient_posterior_mean(Y, X, β_prior_μ, Ω_inv) 
+    β_prior_μ = prior_coeff_mean(β_prior)
+    Ω_inv = prior_row_precision(β_prior)
+    ν₀, S₀ = params(sigma_prior)
+    T = size(Y, 1)
+
+    β_μ = normal_coefficient_posterior_mean(Y, X, β_prior_μ, Ω_inv)
     Ω = inv(Symmetric(X'X + Ω_inv))
 
     # Scale assembled in this order on purpose: the Gibbs non-regression test pins
@@ -112,8 +120,9 @@ function NaturalConjugate(Y, X, β_prior_μ, Ω_inv, sigma_prior::InverseWishart
     ε = Y - X * β_μ
     β_diff = β_μ - β_prior_μ
     S = ε' * ε + β_diff' * Ω_inv * β_diff + Matrix(S₀)
+    
 
-    return NaturalConjugate(β_μ, Ω, inverse_wishart_posterior(S, ν₀ + size(Y, 1)))
+    return NaturalConjugate(β_μ, Ω, inverse_wishart_posterior(S, ν₀ + T))
 end
 
 Base.length(d::NaturalConjugate) = length(d.β_μ)

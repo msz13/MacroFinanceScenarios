@@ -47,13 +47,14 @@ isdefined(TCVAR, :TCVARSV) || error(
         skeleton_T = copy(model.T)
 
         var_coeff = hcat(0.1 * Matrix(1.0I, n, n), 0.5 * Matrix(1.0I, n, n))  # n × n*p
+        β = vec(var_coeff')                                                    # stacked B = A'
         trend_cov = diagm([0.01, 0.02, 0.03])
         Σ_series = zeros(n_time, n, n)
         for t in 1:n_time
             Σ_series[t, :, :] = diagm(fill(0.5 + t / 100, n))     # a genuinely moving Σ_t
         end
 
-        TCVAR.update_tc_var_sv!(model, var_coeff, trend_cov, Σ_series, nt, n, lags)
+        TCVAR.update_tc_var_sv!(model, β, trend_cov, Σ_series, nt, n, lags)
 
         n_states = nt + n * lags
         row0 = nt + n * (lags - 1)
@@ -72,16 +73,16 @@ isdefined(TCVAR, :TCVARSV) || error(
 
         # In place: no reallocation of the n_time × n_states × n_states array.
         Q_before = model.Q
-        TCVAR.update_tc_var_sv!(model, var_coeff, trend_cov, Σ_series, nt, n, lags)
+        TCVAR.update_tc_var_sv!(model, β, trend_cov, Σ_series, nt, n, lags)
         @test model.Q === Q_before
 
         @test_throws DimensionMismatch TCVAR.update_tc_var_sv!(
-            model, var_coeff, trend_cov, zeros(n_time - 1, n, n), nt, n, lags)
+            model, β, trend_cov, zeros(n_time - 1, n, n), nt, n, lags)
         # A constant-Q model has no per-period block to write into.
         constant_q = TCVAR.TimeVaryingStateSpaceModel(model.T, model.R, model.Z,
                                                       zeros(n_states, n_states), model.H)
         @test_throws ArgumentError TCVAR.update_tc_var_sv!(
-            constant_q, var_coeff, trend_cov, Σ_series, nt, n, lags)
+            constant_q, β, trend_cov, Σ_series, nt, n, lags)
     end
 
     @testset "TCVARSV constructor" begin

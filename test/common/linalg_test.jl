@@ -83,7 +83,7 @@ isdefined(TCVAR, :lyapunov_covariance) || error(
         @test Matrix(cov(c₀_prior)) ≈ F * Matrix(cov(c₀_prior)) * F' + Q
 
         model = TCVAR.tc_var(Matrix(1.0I, 2, 2); p = 2)
-        TCVAR.update_tc_var!(model, [0.1 0.0 0.5 0.2; 0.0 0.1 -0.1 0.4],
+        TCVAR.update_tc_var!(model, vec([0.1 0.0 0.5 0.2; 0.0 0.1 -0.1 0.4]'),
                              diagm([0.01, 0.02]), [0.5 0.1; 0.1 0.3], 2, 2, 2)
 
         P = TCVAR.stationary_cycle_covariance(model, 2)

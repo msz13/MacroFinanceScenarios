@@ -14,10 +14,10 @@ parameter draws as one `FlexiChain` and the sampled trend / cycle states.
 All prior quantities are read straight off the distributions in `model.priors`:
 the two `InverseWishart` scales are taken at face value (`Σ ~ IW(Ψ, d)`, the
 Giannone–Lenza–Primiceri parameterization), and the cycle coefficient prior is
-re-ordered from the `MinnesotaPrior` newest-lag-first layout to the
-oldest-lag-first one used by `prepare_var_data` by [`prior_var_coeff`](@ref) and
-[`prior_row_covariance`](@ref), which also drop the intercept row (the cycle is
-mean-zero).
+passed to [`sample_var_params`](@ref) as the `MinnesotaPrior` itself;
+[`NaturalConjugate`](@ref) re-orders it from the newest-lag-first layout to the
+oldest-lag-first one used by `prepare_var_data` and drops the intercept row (the
+cycle is mean-zero).
 """
 
 function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1, logging=false)
@@ -56,10 +56,6 @@ function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1
     trend_covariance_scale = Matrix(Ψτ)
     cycle_covariance_mean  = mean(priors.cycle_covariance)
 
-    #cycle VAR prior in the sampler's oldest-lag-first, no-intercept layout
-    Ω_inv            = inv(prior_row_covariance(β_prior))
-    cycle_coeff_mean = collect(prior_var_coeff(β_prior)')   # k × n_obs
-
     # Initial state mean/covariance for the cycle companion (length / order n_obs*p)
     initial_cycle_mean = mean(priors.initial_cycle)
     initial_cycle_covariance = Matrix(cov(priors.initial_cycle))
@@ -91,7 +87,7 @@ function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1
     # every draw.
     update_tc_var!(
                 ssm,
-                collect(reshape(betas[1, :], k, n_obs)'),
+                betas[1, :],
                 trend_covariance[1, :, :],
                 sigmas[1, :, :],
                 n_trends,
@@ -105,7 +101,7 @@ function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1
 
         trend_covariance[s, :, :] = rand(random_walk_covariance_posterior(trends_states[s,:,:], trend_covariance_scale, dτ_post))
 
-        betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], p, cycle_coeff_mean, Ω_inv, priors.cycle_covariance)
+        betas[s,:], sigmas[s, :, :] = sample_var_params(cycle_states[s,:,:], β_prior, priors.cycle_covariance)
 
         # Update the model with the newly drawn parameters for the next iteration,
         # mutating only the blocks that change (transition cycle block, the two
@@ -113,7 +109,7 @@ function gibbs_sampler(model::TCVAR, data; burnin = 1000, n_samples=1000, thin=1
         # instead of rebuilding the whole StateSpaceModel.
         update_tc_var!(
                     ssm,
-                    collect(reshape(betas[s, :], k, n_obs)'),
+                    betas[s, :],
                     trend_covariance[s, :, :],
                     sigmas[s, :, :],
                     n_trends,

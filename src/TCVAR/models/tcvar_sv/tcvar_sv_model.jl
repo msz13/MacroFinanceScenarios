@@ -139,13 +139,14 @@ function TCVARSV(trend_mapping, priors::TCVARSVPriors, n_time::Int;
 end
 
 """
-    update_tc_var_sv!(model, var_coeff, trend_cov, cycle_covariances, n_trends, n_variables, p)
+    update_tc_var_sv!(model, β, trend_cov, cycle_covariances, n_trends, n_variables, p)
 
 Overwrite, in place, only the blocks of the skeleton that change between Gibbs draws — the
 time-varying counterpart of [`update_tc_var!`](@ref):
 
-* the VAR companion bottom block `[A_p … A_1]` of the transition `T` (`var_coeff`, size
-  `n_variables × n_variables*p`),
+* the VAR companion bottom block `[A_p … A_1]` of the transition `T`, built by
+  [`var_coeff`](@ref) from the stacked coefficients `β = vec(B)` (length
+  `n_variables^2 * p`),
 * the trend block of every `Q_t` (`trend_cov`, the same matrix in every period — the trends
   are homoskedastic),
 * the contemporaneous-cycle block of every `Q_t` (`cycle_covariances[t, :, :]` = `Σ_t`, an
@@ -156,7 +157,7 @@ The `n_time` writes go straight into the array the model already owns, so no
 [`tc_var_sv`](@ref) is constant and left untouched, and the initial state distribution lives
 outside the model, as it does for TCVAR.
 """
-function update_tc_var_sv!(model::TimeVaryingStateSpaceModel, var_coeff, trend_cov,
+function update_tc_var_sv!(model::TimeVaryingStateSpaceModel, β::AbstractVector, trend_cov,
                            cycle_covariances, n_trends, n_variables, p)
 
     Q = model.Q
@@ -176,7 +177,7 @@ function update_tc_var_sv!(model::TimeVaryingStateSpaceModel, var_coeff, trend_c
 
     # Companion bottom block (oldest-lag-first), exactly as in update_tc_var!.
     row0 = n_trends + n_variables * (p - 1)
-    model.T[row0+1:end, n_trends+1:end] = var_coeff
+    model.T[row0+1:end, n_trends+1:end] = var_coeff(β, n_variables, p)
 
     cycle0 = n_states - n_variables      # offset of the contemporaneous cycle block
     @inbounds for t in 1:n_time

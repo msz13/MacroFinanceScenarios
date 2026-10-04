@@ -89,7 +89,7 @@ function build_result(model::TCVARSV, trend_states, cycle_states, volatilities,
     # Return the model with empty params: zero the draw-dependent blocks the sampler filled
     # in, restoring the skeleton built by tc_var_sv.
     n_time = size(model.ssm.Q, 1)
-    update_tc_var_sv!(model.ssm, zeros(n_obs, k), zeros(n_trends, n_trends),
+    update_tc_var_sv!(model.ssm, zeros(k * n_obs), zeros(n_trends, n_trends),
                       zeros(n_time, n_obs, n_obs), n_trends, n_obs, p)
 
     return TCVarSVResult(model, params,
@@ -271,7 +271,7 @@ function simulate_scenarios(model::TCVARSV, params::NamedTuple, initial_state::A
     skeleton = model.ssm
     ssm = TimeVaryingStateSpaceModel(copy(skeleton.T), copy(skeleton.R), copy(skeleton.Z),
                                      zeros(n_steps, n_states, n_states), copy(skeleton.H))
-    var_coeff = collect(float.(params.β)')     # n_obs × k, the companion bottom block
+    β = vec(float.(params.β))                  # stacked k × n_obs coefficients
 
     states       = zeros(n_scenarios, n_steps, n_states)
     observations = zeros(n_scenarios, n_steps, n_obs)
@@ -280,7 +280,7 @@ function simulate_scenarios(model::TCVARSV, params::NamedTuple, initial_state::A
     for s in 1:n_scenarios
         h = simulate_volatility_path(params.μ, params.Φ, params.Ω, initial_volatility,
                                      n_steps)
-        update_tc_var_sv!(ssm, var_coeff, params.Στ, cycle_covariance_path(params.A₀, h),
+        update_tc_var_sv!(ssm, β, params.Στ, cycle_covariance_path(params.A₀, h),
                           n_trends, n_obs, p)
 
         states[s, :, :], observations[s, :, :] = sample(ssm, initial_state, n_steps)

@@ -28,7 +28,8 @@ Prior:
     Σ      ~ IW(Ψ, d)              # supplied by the caller, kept by the caller
     Φ | Σ  ~ MN(Φ₀, Ω, Σ)          # vec(Φ) | Σ ~ N(vec(Φ₀), Σ ⊗ Ω)
 
-Only the coefficient block `(Φ₀, Ω)` is stored. The innovation-covariance prior
+Only the coefficient block is stored, as `(Φ₀, Ω⁻¹)` — the row *precision*, which is
+what the conjugate posterior consumes. The innovation-covariance prior
 is an `InverseWishart` owned by the caller: it enters the construction through
 `E[Σ]` (which sets the scale of `Ω`) and is not copied into the struct, so there
 is a single source of truth for `Ψ` and `d`.
@@ -50,7 +51,7 @@ Minnesota structure:
 - `k::Int`  regressors per equation (`= n*p`, or `n*p + 1` with an intercept)
 - `λ::T`    overall tightness hyperparameter (→0 dogmatic, →∞ flat)
 - `Φ₀`      `k × n` prior coefficient mean
-- `Ω`       `k × k` diagonal prior row-covariance
+- `Ω_inv`   `k × k` diagonal prior row-precision `Ω⁻¹`
 """
 struct MinnesotaPrior{T<:Real}
     n::Int
@@ -58,7 +59,7 @@ struct MinnesotaPrior{T<:Real}
     k::Int
     λ::T
     Φ₀::Matrix{T}
-    Ω::Diagonal{T,Vector{T}}
+    Ω_inv::Diagonal{T,Vector{T}}
 end
 
 """
@@ -113,7 +114,7 @@ function MinnesotaPrior(λ::Real, p::Integer, Σ_prior::InverseWishart;
         Φ₀[i, i] = δ_[i]
     end
 
-    # ---- diagonal of Ω (row-covariance) ----
+    # ---- diagonal of Ω (row-covariance), stored inverted as Ω⁻¹ ----
     # regressor order: [lag1 vars 1..n, lag2 vars 1..n, …, lagp vars 1..n(, const)]
     ω = Vector{T}(undef, k)
     @inbounds for s in 1:p, j in 1:n
@@ -121,13 +122,13 @@ function MinnesotaPrior(λ::Real, p::Integer, Σ_prior::InverseWishart;
     end
     intercept && (ω[k] = ωc_)               # loose intercept
 
-    return MinnesotaPrior{T}(n, p, k, λ_, Φ₀, Diagonal(ω))
+    return MinnesotaPrior{T}(n, p, k, λ_, Φ₀, inv(Diagonal(ω)))
 end
 
 """
     has_intercept(prior::MinnesotaPrior) -> Bool
 
-Whether the prior carries an intercept regressor (the last row of `Φ₀` / `Ω`).
+Whether the prior carries an intercept regressor (the last row of `Φ₀` / `Ω_inv`).
 """
 has_intercept(pr::MinnesotaPrior) = pr.k > pr.n * pr.p
 
@@ -147,14 +148,22 @@ function prior_var_coeff(pr::MinnesotaPrior)
 end
 
 """
-    prior_row_covariance(prior::MinnesotaPrior) -> Diagonal
+    prior_coeff_mean(prior::MinnesotaPrior) -> Matrix
 
-Prior row covariance `Ω` (`n*p × n*p`) in the **oldest-lag-first** ordering used by the
+Prior coefficient mean `B₀` (`n*p × n`) in the regression layout of
+[`prepare_var_data`](@ref) (oldest-lag-first, no intercept), i.e. `prior_var_coeff(prior)'`.
+"""
+prior_coeff_mean(pr::MinnesotaPrior) = collect(prior_var_coeff(pr)')
+
+"""
+    prior_row_precision(prior::MinnesotaPrior) -> Diagonal
+
+Prior row precision `Ω⁻¹` (`n*p × n*p`) in the **oldest-lag-first** ordering used by the
 state-space cycle companion, with the intercept row dropped. Counterpart of
 [`prior_var_coeff`](@ref) for the second moment: `MinnesotaPrior` stores its regressors
 newest-lag-first (`[lag1 … lagp(, const)]`), so the lag blocks are reversed here.
 """
-function prior_row_covariance(pr::MinnesotaPrior)
+function prior_row_precision(pr::MinnesotaPrior)
     k = pr.n * pr.p                          # regressors without the intercept
-    return Diagonal(vec(reverse(reshape(diag(pr.Ω)[1:k], pr.n, pr.p), dims = 2)))
+    return Diagonal(vec(reverse(reshape(diag(pr.Ω_inv)[1:k], pr.n, pr.p), dims = 2)))
 end

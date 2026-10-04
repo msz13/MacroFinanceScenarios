@@ -1,4 +1,14 @@
 """
+    var_coeff(β, n, p) -> Matrix
+
+Companion bottom block `A = B'` (`n × n*p`, oldest-lag-first) from the stacked
+coefficient vector `β = vec(B)`, where `B` is the `n*p × n` regression coefficient
+matrix of `Y = X·B` — the layout the Gibbs sampler stores and
+[`NaturalConjugate`](@ref) draws.
+"""
+var_coeff(β, n, p) = collect(reshape(β, n * p, n)')
+
+"""
     is_stationary(var_coeff, n, p)
 
 Check VAR(p) stationarity via the companion matrix eigenvalues.

@@ -3,41 +3,32 @@
 # stationarity-rejection loop.
 
 """
-    sample_var_params(data, p, β_prior_μ, Ω_inv, sigma_prior; max_draws = 100)
+    sample_var_params(data, β_prior, sigma_prior; max_draws = 100)
 
-Draw `(β, Σ)` from the [`NaturalConjugate`](@ref) posterior of a `p`-lag VAR on
-`data`, rejecting non-stationary coefficient draws.
+Draw `(β, Σ)` from the [`NaturalConjugate`](@ref) posterior of a VAR on
+`data`, rejecting non-stationary draws.
 
     data: observations, including the `p` pre-sample rows
-    p: number of lags
-    β_prior_μ: k × n prior mean of the coefficients
-    Ω_inv: k × k prior row precision of the coefficients
+    β_prior: MinnesotaPrior on the coefficients; the lag order `p` is read off it
     sigma_prior: InverseWishart prior on the innovation covariance
 
-`Σ` is drawn once; `β` is redrawn from its conditional given that `Σ` until it is
-stationary or `max_draws` is reached (the last draw is returned either way).
+`(β, Σ)` is drawn jointly and the pair is redrawn until `β` is stationary or
+`max_draws` is reached (the last draw is returned either way).
 """
-function sample_var_params(data, p, β_prior_μ, Ω_inv, sigma_prior::InverseWishart; max_draws::Int = 100)
+function sample_var_params(data, β_prior::MinnesotaPrior, sigma_prior::InverseWishart; max_draws::Int = 100)
 
+    p = β_prior.p
     Y, X = prepare_var_data(data, p)
     n = size(Y, 2)
 
-    posterior = NaturalConjugate(Y, X, β_prior_μ, Ω_inv, sigma_prior)
+    posterior = NaturalConjugate(Y, X, β_prior, sigma_prior)
 
-    Σ = rand(covariance_posterior(posterior))
-
-    # Σ and X are fixed across rejection draws, so factor the proposal covariance
-    # Σ ⊗ (X'X + Ω⁻¹)⁻¹ once and reuse it.
-    L = coefficient_factor(posterior, Σ)
-    β = rand_coefficients(posterior, Σ, L)
-
-    # Companion bottom block A = B' (n × n*p) in oldest-lag-first ordering.
-    var_coeff(β) = collect(reshape(β, n * p, n)')
+    β, Σ = rand(posterior)
 
     draws = 1
-    while !is_stationary(var_coeff(β), n, p) && draws < max_draws
+    while !is_stationary(var_coeff(β, n, p), n, p) && draws < max_draws
 
-        β = rand_coefficients(posterior, Σ, L)
+        β, Σ = rand(posterior)
         draws += 1
     end
 

@@ -52,9 +52,11 @@ include(joinpath(@__DIR__, "tcvar_test_utils.jl"))
         @test TCVAR.prior_var_coeff(pr) == [0.0 0.0 0.9 0.0
                                       0.0 0.0 0.0 0.8]
 
-        # λ²/(s² σ̄ⱼ) with σ̄ = [4, 1], lag-2 block first, no intercept entry
-        @test diag(TCVAR.prior_row_covariance(pr)) ≈ [0.015625, 0.0625, 0.0625, 0.25]
-        @test size(TCVAR.prior_row_covariance(pr)) == (n * p, n * p)
+        @test TCVAR.prior_coeff_mean(pr) == TCVAR.prior_var_coeff(pr)'
+
+        # precision s² σ̄ⱼ / λ² with σ̄ = [4, 1], lag-2 block first, no intercept entry
+        @test diag(TCVAR.prior_row_precision(pr)) ≈ 1 ./ [0.015625, 0.0625, 0.0625, 0.25]
+        @test size(TCVAR.prior_row_precision(pr)) == (n * p, n * p)
     end
 
     @testset "constructor infers n and p from cycle_β" begin

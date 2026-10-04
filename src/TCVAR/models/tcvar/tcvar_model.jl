@@ -168,12 +168,13 @@ function stationary_cycle_covariance(model::StateSpaceModel, n_trends)
 end
 
 """
-    update_tc_var!(model, var_coeff, trend_cov, cycle_cov, n_trends, n_variables, p)
+    update_tc_var!(model, β, trend_cov, cycle_cov, n_trends, n_variables, p)
 
 Overwrite, in place, only the blocks of `model` that change between Gibbs draws:
 
-* the VAR companion bottom block `[A_p … A_1]` of the transition `T`
-  (`var_coeff`, size `n_variables × n_variables*p`),
+* the VAR companion bottom block `[A_p … A_1]` of the transition `T`, built by
+  [`var_coeff`](@ref) from the stacked coefficients `β = vec(B)` (length
+  `n_variables^2 * p`),
 * the trend block of the state-noise covariance `Q` (`trend_cov`),
 * the contemporaneous-cycle block of `Q` (`cycle_cov`, the last `n_variables`
   states).
@@ -189,7 +190,7 @@ constant across draws and left untouched. This avoids reconstructing the whole
 `StateSpaceModel` (and reallocating several dense `n_states × n_states` matrices)
 on every sweep.
 """
-function update_tc_var!(model::StateSpaceModel, var_coeff, trend_cov, cycle_cov, n_trends, n_variables, p)
+function update_tc_var!(model::StateSpaceModel, β::AbstractVector, trend_cov, cycle_cov, n_trends, n_variables, p)
     n_cycle_states = n_variables * p
     n_states = n_trends + n_cycle_states
 
@@ -197,7 +198,7 @@ function update_tc_var!(model::StateSpaceModel, var_coeff, trend_cov, cycle_cov,
     # cycle transition, sitting at rows n_trends + n_variables*(p-1)+1 : end and
     # cols n_trends+1 : end. The shift block above it is constant.
     row0 = n_trends + n_variables * (p - 1)
-    model.T[row0+1:end, n_trends+1:end] = var_coeff
+    model.T[row0+1:end, n_trends+1:end] = var_coeff(β, n_variables, p)
 
     # Trend block of Q.
     model.Q[1:n_trends, 1:n_trends] = trend_cov

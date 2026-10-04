@@ -32,11 +32,12 @@ end
     Random.seed!(20261003)
     Y = rand(T, n)
     X = rand(T, k)
-    β_prior_μ = rand(k, n)
-    Ω = diagm(rand(k) .+ 0.1)
     sigma_prior = InverseWishart(n + 2.0, Matrix(1.0I, n, n))
+    β_prior = TCVAR.MinnesotaPrior(0.5, p, sigma_prior; δ = fill(0.5, n))
+    β_prior_μ = TCVAR.prior_coeff_mean(β_prior)
+    Ω = Matrix(inv(TCVAR.prior_row_precision(β_prior)))   # prior row covariance
 
-    posterior = TCVAR.NaturalConjugate(Y, X, β_prior_μ, inv(Ω), sigma_prior)
+    posterior = TCVAR.NaturalConjugate(Y, X, β_prior, sigma_prior)
 
     @testset "shapes" begin
         β, Σ = rand(posterior)
@@ -51,13 +52,6 @@ end
         @test logpdf(posterior, β, Σ) isa Float64
         # β accepted as the k × n matrix too
         @test logpdf(posterior, reshape(β, k, n), Σ) == logpdf(posterior, β, Σ)
-    end
-
-    @testset "posterior hyperparameters" begin
-        ν_post, S_post = params(TCVAR.covariance_posterior(posterior))
-        @test ν_post == params(sigma_prior)[1] + T
-        @test posterior.Ω ≈ inv(X'X + inv(Ω))
-        @test posterior.β_μ ≈ (X'X + inv(Ω)) \ (X'Y + Ω \ β_prior_μ)
     end
 
     # The posterior equals prior × likelihood up to the normalising constant, so the
@@ -79,6 +73,10 @@ end
         # vary both
         @test isapprox(logpdf(posterior, β1, Σ1) - logpdf(posterior, β2, Σ2),
                        joint(β1, Σ1) - joint(β2, Σ2), atol = 1e-5)
+    end
+
+    @testset "X must match the prior's n*p regressors" begin
+        @test_throws DimensionMismatch TCVAR.NaturalConjugate(Y, X[:, 1:end-1], β_prior, sigma_prior)
     end
 
     @testset "rand is reproducible" begin

@@ -57,7 +57,7 @@ function build_result(model::TCVAR, trend_states, cycle_states, trend_covariance
 
     # Return the model with empty params: zero the draw-dependent blocks the
     # sampler filled in, restoring the skeleton built by tc_var.
-    update_tc_var!(model.ssm, zeros(n_obs, k), zeros(n_trends, n_trends),
+    update_tc_var!(model.ssm, zeros(k * n_obs), zeros(n_trends, n_trends),
                    zeros(n_obs, n_obs), n_trends, n_obs, p)
 
     return TCVarResult(model, params, trend_states[kept, :, :], cycle_states[kept, :, :])
@@ -142,9 +142,8 @@ function simulate_scenarios(model::TCVAR, params::NamedTuple, initial_state::Abs
 
     # Instantiate the state-space model at the given parameters on a private copy of
     # the skeleton (the model passed in keeps its zero blocks).
-    # var_coeff is β' — the n_obs × k companion bottom block.
     ssm = deepcopy(model.ssm)
-    update_tc_var!(ssm, collect(params.β'), params.Στ, params.Σc, n_trends, n_obs, p)
+    update_tc_var!(ssm, vec(params.β), params.Στ, params.Σc, n_trends, n_obs, p)
 
     states       = zeros(n_scenarios, n_steps, n_trends + k)
     observations = zeros(n_scenarios, n_steps, n_obs)
