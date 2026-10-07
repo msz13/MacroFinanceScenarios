@@ -10,9 +10,19 @@ module TCFSimulation
 end
 
 module ScoreSimulation
-   
+
 end
 
-export TCFSimulation, ScoreSimulation
+module EDA
+
+    export describe_series, correlation_table, print_table
+
+    using DataFrames, PrettyTables, Statistics, StatsBase, TimeSeries
+    include(joinpath(@__DIR__, "EDA", "eda.jl"))
+end
+
+include(joinpath(@__DIR__, "IbbotsonSinquefield", "IbbotsonSinquefield.jl"))
+
+export TCFSimulation, ScoreSimulation, EDA, IbbotsonSinquefield
 
 end

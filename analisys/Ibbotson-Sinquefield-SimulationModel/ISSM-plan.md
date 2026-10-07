@@ -26,8 +26,8 @@ Returns are built from four components (annual, log units):
 #### Data (decisions made)
 
 - Source: `data/ie_data.xlsx`, sheet **`Data2`** (monthly, 1934-01 to 2026-03; columns `Date, P, D, E, CPI, Rate GS10, CAPE, TBILL`, …). Do **not** use `ie_data.xls`: XLSX.jl cannot read `.xls`, and the original Shiller sheet has no T-bill column. 1934 is the first year with TBILL data.
-- Frequency: annual, calendar year (Dec→Dec). Use full years only, i.e. 1934–2025 (2026 is partial).
-- Annual series (all log, decimals):
+- Frequency: annual, calendar year (Dec→Dec). Use full years only, i.e. 1935–2025: Dec→Dec needs December 1933, which Data2 lacks, so 1934 is lost (2026 is partial).
+- Annual series (all log, decimals; the EDA notebook shows them in percent, see task 6):
   - `π_t = log(CPI_Dec,t / CPI_Dec,t-1)`
   - `rf_t = log(1 + TBILL_Dec,t-1/100)`: the 3m yield at the start of the year, rolled forward (approximation; note it in the script).
   - `r_t = rf_t − π_t` (ex-post real rate)
@@ -43,7 +43,7 @@ Wrap the new code in a module `IbbotsonSinquefield` (include it from `MacroFinan
 ```
 src/IbbotsonSinquefield/
   IbbotsonSinquefield.jl   # module, includes below
-  data.jl                  # load_shiller_annual, build_components, subperiod
+  data.jl                  # load_shiller_annual, subperiod
   ar1.jl                   # fit_ar1, AR1 struct (c, φ, σ, residuals)
   simulate.jl              # simulate_is, returns_from_components
 src/EDA/
@@ -70,13 +70,13 @@ test/ibbotson_sinquefield_test.jl
 
 1. **EDA helpers** (`src/EDA/eda.jl`, StatsBase + PrettyTables)
    - `describe_series(ta::TimeArray)`: one row per variable with columns mean, std, skewness, excess kurtosis, AR(1) autocorrelation, min, p25, p50, p75, max.
-   - `print_correlations(ta::TimeArray)`: correlation matrix table.
+   - `correlation_table(ta::TimeArray)`: correlation matrix table.
    - Return the table (see **Reporting**). Print it with `print_table`, so tests can check the numbers.
 
 2. **Data** (`data.jl`)
    - `load_shiller_annual(path; sheet="Data2") -> TimeArray` with π, rf, r, rb, tp, re, xr, cape, Δlog CAPE, erp.
    - `subperiod(ta, (y0, y1))`: annual slice; reused for EDA, AR fit and the bootstrap window.
-   - Test: identities (`re − rf == xr`, `xr − Δlog CAPE == erp`) and no missing values for 1934–2025.
+   - Test: identities (`re − rf == xr`, `xr − Δlog CAPE == erp`) and no missing values for 1935–2025.
 
 3. **AR(1)** (`ar1.jl`)
    - `fit_ar1(x) -> AR1(c, φ, σ, resid, fitted, period)`: call it on a `subperiod` slice and store the period for reporting.
@@ -108,7 +108,7 @@ test/ibbotson_sinquefield_test.jl
    - **Drawdowns:** max drawdown and longest drawdown length per path (nominal and real equity, bonds); report the mean and percentiles.
 
 6. **EDA notebook** (`issm_eda.ipynb`): interactive exploration; the output is the choice of periods and `erp_target`.
-   1. Load data → annual TimeArray.
+   1. Load data → annual TimeArray, then convert to **percent**: every series × 100 except the `cape` level. The library code (`load_shiller_annual`, AR fit, simulation) stays in decimals; only the notebook rescales, for readability. In the notebook, AR(1) constants, σ, residuals and the ERP means are in percentage points (φ, R² and correlations are unit-free), so an `erp_target` chosen there must be divided by 100 before it goes into the report's `params`.
    2. EDA: moments and correlations of π, r, rf, tp, xr, Δlog CAPE, erp, per period.
    3. Define the periods, e.g. `periods = Dict(:full => (1934, 2025), :post1975 => (1975, 2025), ...)`. Fit AR(1) for π and r on each period and print a GLM table per period (coefficients, s.e., R², σ) plus a side-by-side comparison of c, φ, σ and the unconditional mean.
    4. Plot fitted vs actual for π and r; plot residuals (+ residual ACF and a QQ plot).

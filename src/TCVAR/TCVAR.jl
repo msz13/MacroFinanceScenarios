@@ -51,6 +51,7 @@ include("models/tcvar_sv/tcvar_sv_result.jl")
 # reporting/ — summaries, plots and scenario statistics
 include("reporting/posterior_summaries.jl")
 include("reporting/plots.jl")
+include("../common/bond_returns.jl")       # calculate_bond_returns, shared with IbbotsonSinquefield
 include("reporting/scenario_stats.jl")
 
 export tc_var, sample
