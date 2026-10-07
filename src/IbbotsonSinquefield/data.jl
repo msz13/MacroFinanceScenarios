@@ -22,7 +22,9 @@ Annual series, timestamped at 31 December of each year:
 - `xr`     equity excess return, `re − rf`
 - `cape`   CAPE level in December
 - `dlcape` `Δlog CAPE`
-- `erp`    valuation-corrected equity premium, `xr − dlcape`
+- `fr`     fundamental equity return, `re − dlcape`: total return stripped of the valuation change
+- `erp`    valuation-corrected equity premium, `xr − mean(dlcape)`: the average re-rating over
+           the loaded sample is removed, year-to-year valuation changes are kept
 
 Only full calendar years are kept (a trailing partial year is dropped).
 """
@@ -52,11 +54,12 @@ function load_shiller_annual(path::AbstractString; sheet::AbstractString = "Data
     xr = re .- rf
     cape = cur(CAPE[dec])
     dlcape = log.(cape ./ lag(CAPE[dec]))
+    fr = re .- dlcape
     erp = xr .- mean(dlcape)
 
     stamps = Date.(cur(years), 12, 31)
-    return TimeArray(stamps, hcat(π, rf, r, rb, tp, re, xr, cape, dlcape, erp),
-                     [:π, :rf, :r, :rb, :tp, :re, :xr, :cape, :dlcape, :erp])
+    return TimeArray(stamps, hcat(π, rf, r, rb, tp, re, xr, cape, dlcape, fr, erp),
+                     [:π, :rf, :r, :rb, :tp, :re, :xr, :cape, :dlcape, :fr, :erp])
 end
 
 """

@@ -35,6 +35,7 @@ Returns are built from four components (annual, log units):
   - `tp_t = rb_t − rf_t`
   - Equity total return: `re_t = log((P_Dec,t + D_t) / P_Dec,t-1)`, where D_t is the dividend paid over the year (sum of monthly D/12).
   - `xr_t = re_t − rf_t`, `Δlog CAPE_t`, `erp_t = xr_t − Δlog CAPE_t`
+  - Fundamental equity return `fr_t = re_t − Δlog CAPE_t` (total return stripped of the valuation change; EDA only, not bootstrapped)
 
 #### Code layout
 
@@ -74,7 +75,7 @@ test/ibbotson_sinquefield_test.jl
    - Return the table (see **Reporting**). Print it with `print_table`, so tests can check the numbers.
 
 2. **Data** (`data.jl`)
-   - `load_shiller_annual(path; sheet="Data2") -> TimeArray` with π, rf, r, rb, tp, re, xr, cape, Δlog CAPE, erp.
+   - `load_shiller_annual(path; sheet="Data2") -> TimeArray` with π, rf, r, rb, tp, re, xr, cape, Δlog CAPE, fr, erp.
    - `subperiod(ta, (y0, y1))`: annual slice; reused for EDA, AR fit and the bootstrap window.
    - Test: identities (`re − rf == xr`, `xr − Δlog CAPE == erp`) and no missing values for 1935–2025.
 

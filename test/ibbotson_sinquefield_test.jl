@@ -11,7 +11,7 @@ using MacroFinanceScenarios.EDA
     ta = load_shiller_annual(joinpath(@__DIR__, "..", "data", "ie_data.xlsx"))
 
     @testset "columns and sample" begin
-        @test colnames(ta) == [:π, :rf, :r, :rb, :tp, :re, :xr, :cape, :dlcape, :erp]
+        @test colnames(ta) == [:π, :rf, :r, :rb, :tp, :re, :xr, :cape, :dlcape, :fr, :erp]
         # Data2 starts in 1934-01, so 1935 is the first full Dec→Dec year; 2026 is partial.
         @test year.(timestamp(ta)) == collect(1935:2025)
         @test all(isfinite, values(ta))
@@ -20,7 +20,8 @@ using MacroFinanceScenarios.EDA
     @testset "identities" begin
         v(name) = values(ta[name])
         @test v(:re) .- v(:rf) ≈ v(:xr)
-        @test v(:xr) .- v(:dlcape) ≈ v(:erp)
+        @test v(:xr) .- mean(v(:dlcape)) ≈ v(:erp)
+        @test v(:re) .- v(:dlcape) ≈ v(:fr)
         @test v(:rf) .- v(:π) ≈ v(:r)
         @test v(:rb) .- v(:rf) ≈ v(:tp)
         @test v(:dlcape)[2:end] ≈ diff(log.(v(:cape)))
