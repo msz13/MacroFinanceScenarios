@@ -16,7 +16,8 @@ Annual series, timestamped at 31 December of each year:
            the 3m rates during the year)
 - `r`      ex-post real short rate, `rf − π`
 - `rb`     10y par-bond return from GS10 (`calculate_bond_returns`, annual step), in logs
-- `tp`     term premium, `rb − rf`
+- `tp`     term spread, `log(1 + GS10_Dec,t-1) − rf`: the 10y yield at the start of the year
+           over the T-bill yield, so `rf + tp` is the (log) 10y yield at the start of year t
 - `re`     equity total return, `log((P_Dec,t + D_t) / P_Dec,t-1)` with `D_t` the sum of
            monthly D/12 over the year
 - `xr`     equity excess return, `re − rf`
@@ -49,7 +50,7 @@ function load_shiller_annual(path::AbstractString; sheet::AbstractString = "Data
     rf = log.(1 .+ lag(TBILL[dec]) ./ 100)
     r  = rf .- π
     rb = log.(1 .+ vec(calculate_bond_returns(GS10[dec] ./ 100, bond_maturity, 1)))
-    tp = rb .- rf
+    tp = log.(1 .+ lag(GS10[dec]) ./ 100) .- rf
     re = log.((cur(P[dec]) .+ cur(dividends)) ./ lag(P[dec]))
     xr = re .- rf
     cape = cur(CAPE[dec])
