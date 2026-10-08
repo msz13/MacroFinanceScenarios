@@ -3,46 +3,8 @@ using PrettyTables
 using TimeSeries
 
 
-function max_drawdown_and_length(returns::Matrix{Float64})
-    # returns: Matrix where each column is a scenario, each row a time step
-    # Returns a tuple of vectors: (max_drawdowns, max_dd_lengths)
-    
-    n_scenarios = size(returns, 2)
-    max_drawdowns = zeros(Float64, n_scenarios)
-    max_dd_lengths = zeros(Int, n_scenarios)
-    
-    for scenario in 1:n_scenarios
-        # Calculate cumulative returns and convert to price path
-        cum_returns = cumsum(returns[:, scenario])
-        prices = exp.(cum_returns)  # Assuming log-returns, starting price = 1
-        
-        max_price = prices[1]  # Track historical peak
-        max_drawdown = 0.0     # Maximum drawdown (percentage)
-        current_dd_length = 0  # Current drawdown length
-        max_dd_length = 0      # Maximum drawdown length
-        start_idx = 1          # Start index of current drawdown
-        
-        for t in 2:length(prices)
-            if prices[t] >= max_price
-                # New peak, reset drawdown
-                max_price = prices[t]
-                current_dd_length = 0
-                start_idx = t
-            else
-                # In drawdown, update length and drawdown
-                current_dd_length = t - start_idx + 1
-                current_drawdown = (max_price - prices[t]) / max_price
-                max_dd_length = max(max_dd_length, current_dd_length)
-                max_drawdown = max(max_drawdown, current_drawdown)
-            end
-        end
-        
-        max_drawdowns[scenario] = max_drawdown
-        max_dd_lengths[scenario] = max_dd_length
-    end
-    
-    return (max_drawdowns, max_dd_lengths)
-end
+# max_drawdown_and_length, annualise and print_percentiles (now period_percentiles) moved
+# to src/ScenariosEvaluation/evaluation.jl.
 
 function returns_summarystats(data::TimeArray,t)
     names = colnames(data)
@@ -75,33 +37,6 @@ function cor_returns(returns:: TimeArray)
     corr = cor(values(returns))
     return pretty_table(corr, column_labels=col, backend = Val(:html), row_labels=col)
 end
-
-function annualise(scenarios:: Matrix, shift=2)
-   
-    periods = floor.(Int, size(scenarios)[2]/shift)
-    result = zeros(size(scenarios)[1],periods)
-
-    for p in 1:periods
-        start = (p-1)*shift+1
-        en = p*shift
-        result[:,p] .= sum(scenarios[:,start:en],dims=2)
-    end 
-    return result
-   
-end
-
-
-function print_percentiles(X, perc, freq=1, title="")
-    scenarios = annualise(X, freq)
-    years = size(scenarios)[2]
-    simulation_perc = zeros(length(perc),years)
-
-    for t in 1:years
-        simulation_perc[:,t] = quantile(scenarios[:,t],perc)
-    end
-    pretty_table(round.(simulation_perc, digits=4), backend = Val(:html), column_labels=1:years, row_labels=perc, title=title)
-end
-
 
 function sum_returns_between_periods(scenarios::Matrix{Float64}, periods::Vector{Int})
     # Validate inputs

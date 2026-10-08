@@ -23,6 +23,16 @@ end
 
 include(joinpath(@__DIR__, "IbbotsonSinquefield", "IbbotsonSinquefield.jl"))
 
-export TCFSimulation, ScoreSimulation, EDA, IbbotsonSinquefield
+module ScenariosEvaluation
+
+    export path_moments, mean_correlations, horizon_values, horizon_percentiles
+    export max_drawdown_and_length, drawdown_table, annualise, period_percentiles
+
+    using DataFrames, Statistics, StatsBase
+    using ..IbbotsonSinquefield: Scenarios
+    include(joinpath(@__DIR__, "ScenariosEvaluation", "evaluation.jl"))
+end
+
+export TCFSimulation, ScoreSimulation, EDA, IbbotsonSinquefield, ScenariosEvaluation
 
 end
