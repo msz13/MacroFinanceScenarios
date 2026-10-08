@@ -38,6 +38,75 @@ using MacroFinanceScenarios.EDA
     end
 end
 
+@testset "transform_columns" begin
+    stamps = Date.(2000:2004, 12, 31)
+    ta = TimeArray(stamps, [1.0 10.0 100.0; 2.0 20.0 200.0; 3.0 30.0 300.0;
+                            4.0 40.0 400.0; 5.0 50.0 500.0], [:a, :b, :c])
+    v(t, n) = values(t[n])
+    demean(x) = x .- mean(x)
+
+    @testset "pipeline on selected columns, remainder passes through" begin
+        out = transform_columns(ta, [:a, :b] => [x -> 2 .* x, demean])
+        @test colnames(out) == [:a, :b, :c]
+        @test timestamp(out) == stamps
+        @test v(out, :a) ≈ 2 .* v(ta, :a) .- 6
+        @test v(out, :b) ≈ 2 .* v(ta, :b) .- 60
+        @test v(out, :c) == v(ta, :c)
+    end
+
+    @testset "Except, single function and spec order" begin
+        out = transform_columns(ta, :c => x -> log.(x), Except(:c) => demean, :a => x -> x ./ 2)
+        @test v(out, :c) ≈ log.(v(ta, :c))
+        @test v(out, :b) ≈ v(ta, :b) .- 30
+        @test v(out, :a) ≈ (v(ta, :a) .- 3) ./ 2   # :a got both specs, in order
+        @test values(transform_columns(ta, Except() => demean)) ≈ values(ta) .- mean(values(ta); dims = 1)
+    end
+
+    @testset "remainder = :drop" begin
+        out = transform_columns(ta, :c => demean, :a => identity; remainder = :drop)
+        @test colnames(out) == [:a, :c]   # original order
+    end
+
+    @testset "errors" begin
+        @test_throws ArgumentError transform_columns(ta, :z => identity)
+        @test_throws ArgumentError transform_columns(ta, :a => identity; remainder = :foo)
+        @test_throws DimensionMismatch transform_columns(ta, :a => diff)
+    end
+
+    @testset "fitted steps and inverse" begin
+        ct = fit_columns(ta, :c => log => exp, Except(:c) => [Affine(100, 0), Standardize()],
+                         :b => Demean())
+        z = transform_columns(ct, ta)
+        @test v(z, :c) ≈ log.(v(ta, :c))
+        @test mean(v(z, :a)) ≈ 0 atol = 1e-12
+        @test std(v(z, :a)) ≈ 1
+        @test values(inverse_transform_columns(ct, z)) ≈ values(ta)
+        # Fitted means and scales are frozen: a new sample is transformed with them.
+        new = TimeArray(stamps, values(ta) .+ 1, [:a, :b, :c])
+        @test v(transform_columns(ct, new), :a) ≈ (100 .* (v(ta, :a) .+ 1) .- 300) ./ (100 * std(v(ta, :a)))
+        # Any subset of the columns, in any order, can be inverted.
+        @test values(inverse_transform_columns(ct, z[:c, :a])) ≈ values(ta[:c, :a])
+    end
+
+    @testset "inverse on Scenarios" begin
+        ct = fit_columns(ta, :c => log => exp, [:a, :b] => Standardize())
+        z = values(transform_columns(ct, ta))
+        paths = cat(permutedims(z), 2 .* permutedims(z); dims = 3)   # 3 vars × 5 years × 2 scen
+        sc = inverse_transform_columns(ct, Scenarios(paths, [:a, :b, :c], 2005))
+        @test sc.names == [:a, :b, :c]
+        @test sc.start_year == 2005
+        @test sc[:a][:, 1] ≈ v(ta, :a)
+        @test sc[:a][:, 2] ≈ mean(v(ta, :a)) .+ 2 .* std(v(ta, :a)) .* z[:, 1]
+        @test sc[:c][:, 2] ≈ v(ta, :c) .^ 2
+    end
+
+    @testset "inverse errors" begin
+        ct = fit_columns(ta, :a => x -> x .- mean(x); remainder = :drop)
+        @test_throws ArgumentError inverse_transform_columns(ct, transform_columns(ct, ta))
+        @test_throws ArgumentError inverse_transform_columns(ct, ta)   # :b, :c were dropped
+    end
+end
+
 @testset "EDA tables" begin
     x = [0.1, -0.2, 0.3, 0.05, 0.0, 0.15, -0.1]
     y = [1.0, 2.0, 2.5, 4.0, 3.0, 6.0, 8.0]
